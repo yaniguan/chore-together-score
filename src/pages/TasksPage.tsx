@@ -7,16 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Plus, Pencil, Trash2 } from 'lucide-react';
 import { motion } from 'framer-motion';
-
-// ── Category definitions ──────────────────────────────────────────────────────
-export const CATEGORIES: { value: string; label: string; emoji: string }[] = [
-  { value: 'kitchen',     label: 'Kitchen',     emoji: '🍳' },
-  { value: 'bedroom',     label: 'Bedroom',     emoji: '🛏️' },
-  { value: 'bathroom',    label: 'Bathroom',    emoji: '🚿' },
-  { value: 'living_room', label: 'Living Room', emoji: '🛋️' },
-  { value: 'dog',         label: 'Dog',         emoji: '🐕' },
-  { value: 'other',       label: 'Other',       emoji: '📦' },
-];
+import { CATEGORIES, CategoryValue } from '@/lib/constants';
 
 const EMOJI_OPTIONS = ['🏠', '🐕', '🍖', '🧹', '🪣', '🛒', '🚽', '👕', '🗑️', '🍳', '🧽', '🪴', '🚿', '🧺', '🍽️', '🛏️', '💊', '📬', '🧴', '🪥', '🫧', '🧹', '🪟', '🌿'];
 const COLOR_OPTIONS = ['#0D9488', '#F97066', '#F59E0B', '#8B5CF6', '#EC4899', '#3B82F6', '#6B7280', '#10B981'];
@@ -24,7 +15,7 @@ const COLOR_OPTIONS = ['#0D9488', '#F97066', '#F59E0B', '#8B5CF6', '#EC4899', '#
 interface TaskFormData {
   name: string;
   icon: string;
-  category: string;
+  category: CategoryValue;
   frequency: string;
   frequency_value: number;
   max_per_cycle: number;

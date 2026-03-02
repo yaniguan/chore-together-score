@@ -4,11 +4,15 @@ import { supabase } from '@/integrations/supabase/client';
 import { motion } from 'framer-motion';
 import confetti from 'canvas-confetti';
 import { Check, Star, Minus } from 'lucide-react';
-import { useState } from 'react';
+
+const getTodayStart = () => {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d;
+};
 
 const getTodayCompletions = (completions: Completion[], taskId: string, memberId?: string) => {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const today = getTodayStart();
   return completions.filter(c =>
     c.task_id === taskId &&
     new Date(c.completed_at) >= today &&
@@ -28,6 +32,15 @@ const TaskCard: React.FC<{ task: Task; onComplete?: () => void }> = ({ task, onC
     getTodayCompletions(completions, task.id),
     [completions, task.id]
   );
+
+  // Pre-compute per-member counts in a single pass
+  const memberCounts = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const c of todayAllCompletions) {
+      map[c.member_id] = (map[c.member_id] ?? 0) + 1;
+    }
+    return map;
+  }, [todayAllCompletions]);
 
   const canComplete = todayMyCompletions.length < task.max_per_cycle;
   const canUndo = todayMyCompletions.length > 0;
@@ -54,9 +67,8 @@ const TaskCard: React.FC<{ task: Task; onComplete?: () => void }> = ({ task, onC
 
   const handleUndo = async () => {
     if (!canUndo || !currentMember) return;
-    // Delete the most recent completion for this member+task today
     const latest = todayMyCompletions.reduce((a, b) =>
-      new Date(a.completed_at) > new Date(b.completed_at) ? a : b
+      a.completed_at > b.completed_at ? a : b
     );
     await supabase.from('completions').delete().eq('id', latest.id);
     onComplete?.();
@@ -81,12 +93,12 @@ const TaskCard: React.FC<{ task: Task; onComplete?: () => void }> = ({ task, onC
               {todayAllCompletions.length}/{task.max_per_cycle} today
             </span>
           </div>
-          {/* Who did it today */}
+          {/* Who did it today — rendered from pre-computed map */}
           {todayAllCompletions.length > 0 && (
             <div className="flex gap-1 mt-1.5">
               {members.map(m => {
-                const count = getTodayCompletions(completions, task.id, m.id).length;
-                if (count === 0) return null;
+                const count = memberCounts[m.id];
+                if (!count) return null;
                 return (
                   <span key={m.id} className="text-[10px] font-semibold px-2 py-0.5 rounded-full text-primary-foreground" style={{ backgroundColor: m.avatar_color }}>
                     {m.display_name.split(' ')[0]} ×{count}
@@ -97,7 +109,7 @@ const TaskCard: React.FC<{ task: Task; onComplete?: () => void }> = ({ task, onC
           )}
         </div>
 
-        {/* Undo button — only shown when current member has logged at least once today */}
+        {/* Undo button */}
         {canUndo && (
           <motion.button
             whileTap={{ scale: 0.85 }}

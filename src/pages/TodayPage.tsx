@@ -6,7 +6,7 @@ import { motion } from 'framer-motion';
 import { supabase } from '@/integrations/supabase/client';
 import { Star, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { CATEGORIES } from '@/pages/TasksPage';
+import { CATEGORIES } from '@/lib/constants';
 
 const TodayPage: React.FC = () => {
   const { tasks, completions, currentMember, members, refreshData, householdId } = useHousehold();
@@ -24,7 +24,6 @@ const TodayPage: React.FC = () => {
     return 'Good evening';
   };
 
-  // Days that have any completions in the 90-day context window
   const daysWithCompletions = useMemo(() => {
     const s = new Set<string>();
     for (const c of completions) {
@@ -34,7 +33,6 @@ const TodayPage: React.FC = () => {
     return s;
   }, [completions]);
 
-  // Points for selected date
   const startOfSelected = useMemo(() => {
     const d = new Date(selectedDate);
     d.setHours(0, 0, 0, 0);
@@ -64,7 +62,26 @@ const TodayPage: React.FC = () => {
     }));
   }, [isToday, completions, otherDateCompletions, members, startOfSelected]);
 
-  // Fetch completions for non-today dates
+  // Memoized grouped tasks (same pattern as TasksPage)
+  const groupedTasks = useMemo(() =>
+    CATEGORIES
+      .map(cat => ({ ...cat, tasks: tasks.filter(t => (t.category ?? 'other') === cat.value) }))
+      .filter(g => g.tasks.length > 0),
+    [tasks]
+  );
+
+  // Pre-compute per-member stats for each task on a past date (single pass per task)
+  const otherDateStatsByTask = useMemo(() => {
+    const map: Record<string, Record<string, { count: number; pts: number }>> = {};
+    for (const c of otherDateCompletions) {
+      if (!map[c.task_id]) map[c.task_id] = {};
+      if (!map[c.task_id][c.member_id]) map[c.task_id][c.member_id] = { count: 0, pts: 0 };
+      map[c.task_id][c.member_id].count += 1;
+      map[c.task_id][c.member_id].pts += c.points_earned;
+    }
+    return map;
+  }, [otherDateCompletions]);
+
   const fetchOtherDate = useCallback(async () => {
     if (isToday || !householdId) return;
     setLoadingOther(true);
@@ -209,98 +226,93 @@ const TodayPage: React.FC = () => {
           <p className="text-muted-foreground text-sm py-4 text-center">Loading...</p>
         )}
 
-        {(!loadingOther || isToday) && CATEGORIES
-          .map(cat => ({ ...cat, tasks: tasks.filter(t => (t.category ?? 'other') === cat.value) }))
-          .filter(g => g.tasks.length > 0)
-          .map((group, gi) => (
-            <motion.div
-              key={group.value}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: gi * 0.04 }}
-            >
-              {/* Category header */}
-              <div className="flex items-center gap-2 mb-2">
-                <span className="text-base">{group.emoji}</span>
-                <h3 className="font-semibold text-foreground text-sm">{group.label}</h3>
-                <div className="flex-1 h-px bg-border" />
-              </div>
+        {(!loadingOther || isToday) && groupedTasks.map((group, gi) => (
+          <motion.div
+            key={group.value}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: gi * 0.04 }}
+          >
+            {/* Category header */}
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-base">{group.emoji}</span>
+              <h3 className="font-semibold text-foreground text-sm">{group.label}</h3>
+              <div className="flex-1 h-px bg-border" />
+            </div>
 
-              <div className="space-y-2">
-                {isToday
-                  ? group.tasks.map((task, i) => (
+            <div className="space-y-2">
+              {isToday
+                ? group.tasks.map((task, i) => (
+                    <motion.div
+                      key={task.id}
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: gi * 0.04 + i * 0.04 }}
+                    >
+                      <TaskCard task={task} onComplete={refreshData} />
+                    </motion.div>
+                  ))
+                : group.tasks.map((task, i) => {
+                    const taskStats = otherDateStatsByTask[task.id] ?? {};
+                    return (
                       <motion.div
                         key={task.id}
                         initial={{ opacity: 0, y: 6 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: gi * 0.04 + i * 0.04 }}
+                        className="bg-card rounded-2xl border p-4 shadow-sm"
                       >
-                        <TaskCard task={task} onComplete={refreshData} />
-                      </motion.div>
-                    ))
-                  : group.tasks.map((task, i) => {
-                      const taskCompletions = otherDateCompletions.filter(c => c.task_id === task.id);
-                      return (
-                        <motion.div
-                          key={task.id}
-                          initial={{ opacity: 0, y: 6 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: gi * 0.04 + i * 0.04 }}
-                          className="bg-card rounded-2xl border p-4 shadow-sm"
-                        >
-                          <div className="flex items-start gap-3">
-                            <div className="text-3xl flex-shrink-0">{task.icon}</div>
-                            <div className="flex-1 min-w-0">
-                              <h3 className="font-bold text-foreground truncate">{task.name}</h3>
-                              <div className="flex items-center gap-2 mt-0.5">
-                                <Star className="w-3.5 h-3.5 text-amber-500" />
-                                <span className="text-sm font-semibold text-amber-600">{task.points} pts each</span>
-                              </div>
-                              {/* Who completed it */}
-                              <div className="mt-2 space-y-0.5">
-                                {members.map(m => {
-                                  const count = taskCompletions.filter(c => c.member_id === m.id).length;
-                                  const pts = taskCompletions.filter(c => c.member_id === m.id).reduce((s, c) => s + c.points_earned, 0);
-                                  if (count === 0) return (
-                                    <p key={m.id} className="text-xs text-muted-foreground">{m.display_name.split(' ')[0]}: none</p>
-                                  );
-                                  return (
-                                    <p key={m.id} className="text-xs font-semibold" style={{ color: m.avatar_color }}>
-                                      {m.display_name.split(' ')[0]} ×{count} (+{pts} pts)
-                                    </p>
-                                  );
-                                })}
-                              </div>
-                              {/* Quick log buttons */}
-                              <div className="flex gap-2 mt-3">
-                                {members.map(m => {
-                                  const key = `${task.id}-${m.id}`;
-                                  return (
-                                    <Button
-                                      key={m.id}
-                                      variant="outline"
-                                      size="sm"
-                                      className="text-xs h-7 px-3"
-                                      disabled={loggingTask[key]}
-                                      onClick={() => handleQuickLog(task.id, m.id)}
-                                      style={{ borderColor: m.avatar_color, color: m.avatar_color }}
-                                    >
-                                      <Plus className="w-3 h-3 mr-1" />
-                                      {m.display_name.split(' ')[0]}
-                                    </Button>
-                                  );
-                                })}
-                              </div>
+                        <div className="flex items-start gap-3">
+                          <div className="text-3xl flex-shrink-0">{task.icon}</div>
+                          <div className="flex-1 min-w-0">
+                            <h3 className="font-bold text-foreground truncate">{task.name}</h3>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <Star className="w-3.5 h-3.5 text-amber-500" />
+                              <span className="text-sm font-semibold text-amber-600">{task.points} pts each</span>
+                            </div>
+                            {/* Who completed it — single-pass via pre-computed map */}
+                            <div className="mt-2 space-y-0.5">
+                              {members.map(m => {
+                                const stat = taskStats[m.id];
+                                if (!stat) return (
+                                  <p key={m.id} className="text-xs text-muted-foreground">{m.display_name.split(' ')[0]}: none</p>
+                                );
+                                return (
+                                  <p key={m.id} className="text-xs font-semibold" style={{ color: m.avatar_color }}>
+                                    {m.display_name.split(' ')[0]} ×{stat.count} (+{stat.pts} pts)
+                                  </p>
+                                );
+                              })}
+                            </div>
+                            {/* Quick log buttons */}
+                            <div className="flex gap-2 mt-3">
+                              {members.map(m => {
+                                const key = `${task.id}-${m.id}`;
+                                return (
+                                  <Button
+                                    key={m.id}
+                                    variant="outline"
+                                    size="sm"
+                                    className="text-xs h-7 px-3"
+                                    disabled={loggingTask[key]}
+                                    onClick={() => handleQuickLog(task.id, m.id)}
+                                    style={{ borderColor: m.avatar_color, color: m.avatar_color }}
+                                  >
+                                    <Plus className="w-3 h-3 mr-1" />
+                                    {m.display_name.split(' ')[0]}
+                                  </Button>
+                                );
+                              })}
                             </div>
                           </div>
-                        </motion.div>
-                      );
-                    })
-                }
-              </div>
-            </motion.div>
-          ))
-        }
+                        </div>
+                      </motion.div>
+                    );
+                  })
+              }
+            </div>
+          </motion.div>
+        ))}
       </div>
     </div>
   );
