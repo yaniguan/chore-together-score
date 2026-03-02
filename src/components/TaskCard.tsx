@@ -1,35 +1,21 @@
 import React, { useMemo } from 'react';
-import { useHousehold, Task, Completion } from '@/context/HouseholdContext';
+import { useHousehold, Task } from '@/context/HouseholdContext';
 import { supabase } from '@/integrations/supabase/client';
 import { motion } from 'framer-motion';
 import confetti from 'canvas-confetti';
 import { Check, Star, Minus } from 'lucide-react';
-
-const getTodayStart = () => {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d;
-};
-
-const getTodayCompletions = (completions: Completion[], taskId: string, memberId?: string) => {
-  const today = getTodayStart();
-  return completions.filter(c =>
-    c.task_id === taskId &&
-    new Date(c.completed_at) >= today &&
-    (!memberId || c.member_id === memberId)
-  );
-};
+import { getTaskCompletionsForDate } from '@/lib/completions';
 
 const TaskCard: React.FC<{ task: Task; onComplete?: () => void }> = ({ task, onComplete }) => {
   const { currentMember, completions, householdId, members } = useHousehold();
 
   const todayMyCompletions = useMemo(() =>
-    getTodayCompletions(completions, task.id, currentMember?.id),
+    getTaskCompletionsForDate(completions, task.id, new Date(), currentMember?.id),
     [completions, task.id, currentMember?.id]
   );
 
   const todayAllCompletions = useMemo(() =>
-    getTodayCompletions(completions, task.id),
+    getTaskCompletionsForDate(completions, task.id, new Date()),
     [completions, task.id]
   );
 

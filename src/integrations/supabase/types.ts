@@ -187,6 +187,7 @@ export type Database = {
           icon: string
           points_cost: number
           created_at: string
+          category: string | null
         }
         Insert: {
           id?: string
@@ -195,6 +196,7 @@ export type Database = {
           icon?: string
           points_cost: number
           created_at?: string
+          category?: string | null
         }
         Update: {
           id?: string
@@ -203,6 +205,7 @@ export type Database = {
           icon?: string
           points_cost?: number
           created_at?: string
+          category?: string | null
         }
         Relationships: [
           {

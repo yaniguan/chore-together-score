@@ -1,17 +1,59 @@
 import React from 'react';
 import { useHousehold } from '@/context/HouseholdContext';
 import { Button } from '@/components/ui/button';
-import { LogOut, Users, Home } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
+import { LogOut, Users, Home, Sun, Bell } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { useTheme } from 'next-themes';
+import { useNotifications } from '@/hooks/useNotifications';
 
 const SettingsPage: React.FC = () => {
   const { currentMember, members, householdId, logout } = useHousehold();
+  const { theme, setTheme } = useTheme();
+  const isDark = theme === 'dark';
+  const { enabled: notificationsEnabled, toggle: toggleNotifications } = useNotifications();
 
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-extrabold text-foreground">Settings</h1>
 
+      {/* Appearance */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-card rounded-2xl border p-5 space-y-4">
+        <div className="flex items-center gap-2">
+          <Sun className="w-5 h-5 text-primary" />
+          <h2 className="font-bold">Appearance</h2>
+        </div>
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-semibold text-foreground">Dark Mode</p>
+            <p className="text-xs text-muted-foreground">Switch between light and dark theme</p>
+          </div>
+          <Switch
+            checked={isDark}
+            onCheckedChange={checked => setTheme(checked ? 'dark' : 'light')}
+          />
+        </div>
+      </motion.div>
+
+      {/* Notifications */}
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="bg-card rounded-2xl border p-5 space-y-4">
+        <div className="flex items-center gap-2">
+          <Bell className="w-5 h-5 text-primary" />
+          <h2 className="font-bold">Notifications</h2>
+        </div>
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-semibold text-foreground">Daily Reminder</p>
+            <p className="text-xs text-muted-foreground">Remind at 9 PM if tasks remain</p>
+          </div>
+          <Switch
+            checked={notificationsEnabled}
+            onCheckedChange={toggleNotifications}
+          />
+        </div>
+      </motion.div>
+
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="bg-card rounded-2xl border p-5 space-y-4">
         <div className="flex items-center gap-2">
           <Home className="w-5 h-5 text-primary" />
           <h2 className="font-bold">Household</h2>

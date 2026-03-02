@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useHousehold } from '@/context/HouseholdContext';
 import { supabase } from '@/integrations/supabase/client';
 import { Completion } from '@/context/HouseholdContext';
+import { getDayBounds } from '@/lib/completions';
 
 interface Props {
   date: Date | null;
@@ -20,29 +21,26 @@ const DayDetailDialog: React.FC<Props> = ({ date, onClose }) => {
   const [selectedMemberId, setSelectedMemberId] = useState<string>('');
   const [submitting, setSubmitting] = useState(false);
 
-  const fetchDayCompletions = async () => {
+  const fetchDayCompletions = useCallback(async () => {
     if (!date || !householdId) return;
     setLoading(true);
-    const startOfDay = new Date(date);
-    startOfDay.setHours(0, 0, 0, 0);
-    const endOfDay = new Date(date);
-    endOfDay.setHours(23, 59, 59, 999);
+    const { start: startOfDay, end: endOfDay } = getDayBounds(date);
 
     const { data } = await supabase.from('completions').select('*')
       .eq('household_id', householdId)
       .gte('completed_at', startOfDay.toISOString())
-      .lt('completed_at', endOfDay.toISOString());
+      .lte('completed_at', endOfDay.toISOString());
 
     if (data) setDayCompletions(data as Completion[]);
     setLoading(false);
-  };
+  }, [date, householdId]);
 
   useEffect(() => {
     fetchDayCompletions();
     setShowAddForm(false);
     setSelectedTaskId('');
     setSelectedMemberId('');
-  }, [date, householdId]);
+  }, [date, householdId, fetchDayCompletions]);
 
   const handleAddEntry = async () => {
     if (!selectedTaskId || !selectedMemberId || !date || !householdId) return;

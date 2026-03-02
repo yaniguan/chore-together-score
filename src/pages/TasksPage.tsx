@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { useHousehold } from '@/context/HouseholdContext';
+import { Task, useHousehold } from '@/context/HouseholdContext';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -64,7 +64,7 @@ const TasksPage: React.FC = () => {
     refreshData();
   };
 
-  const handleEdit = (task: any) => {
+  const handleEdit = (task: Task) => {
     setForm({
       name: task.name,
       icon: task.icon,

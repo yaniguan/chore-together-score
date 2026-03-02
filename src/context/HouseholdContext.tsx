@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { parseStoredHouseholdMember } from '@/lib/householdStorage';
 
 export interface HouseholdMember {
   id: string;
@@ -40,6 +41,7 @@ export interface Reward {
   icon: string;
   points_cost: number;
   created_at: string;
+  category: string | null;
 }
 
 export interface Redemption {
@@ -69,6 +71,8 @@ interface HouseholdContextType {
 }
 
 const HouseholdContext = createContext<HouseholdContextType | null>(null);
+const HOUSEHOLD_ID_STORAGE_KEY = 'homepace_household_id';
+const MEMBER_STORAGE_KEY = 'homepace_member';
 
 export const useHousehold = () => {
   const ctx = useContext(HouseholdContext);
@@ -88,10 +92,16 @@ const SEED_TASKS = [
 ];
 
 export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [householdId, setHouseholdIdState] = useState<string | null>(() => localStorage.getItem('homepace_household_id'));
+  const [householdId, setHouseholdIdState] = useState<string | null>(() => localStorage.getItem(HOUSEHOLD_ID_STORAGE_KEY));
   const [currentMember, setCurrentMemberState] = useState<HouseholdMember | null>(() => {
-    const stored = localStorage.getItem('homepace_member');
-    return stored ? JSON.parse(stored) : null;
+    const stored = localStorage.getItem(MEMBER_STORAGE_KEY);
+    const parsed = parseStoredHouseholdMember(stored);
+
+    if (stored && !parsed) {
+      localStorage.removeItem(MEMBER_STORAGE_KEY);
+    }
+
+    return parsed;
   });
   const [members, setMembers] = useState<HouseholdMember[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -101,18 +111,18 @@ export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [redemptions, setRedemptions] = useState<Redemption[]>([]);
 
   const setHouseholdId = (id: string) => {
-    localStorage.setItem('homepace_household_id', id);
+    localStorage.setItem(HOUSEHOLD_ID_STORAGE_KEY, id);
     setHouseholdIdState(id);
   };
 
   const setCurrentMember = (member: HouseholdMember) => {
-    localStorage.setItem('homepace_member', JSON.stringify(member));
+    localStorage.setItem(MEMBER_STORAGE_KEY, JSON.stringify(member));
     setCurrentMemberState(member);
   };
 
   const logout = () => {
-    localStorage.removeItem('homepace_household_id');
-    localStorage.removeItem('homepace_member');
+    localStorage.removeItem(HOUSEHOLD_ID_STORAGE_KEY);
+    localStorage.removeItem(MEMBER_STORAGE_KEY);
     setHouseholdIdState(null);
     setCurrentMemberState(null);
     setMembers([]);

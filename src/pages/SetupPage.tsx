@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { useHousehold } from '@/context/HouseholdContext';
+import { HouseholdMember, useHousehold } from '@/context/HouseholdContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -20,7 +20,7 @@ const SetupPage: React.FC = () => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [createdHouseholdId, setCreatedHouseholdId] = useState('');
-  const [joinedMembers, setJoinedMembers] = useState<any[]>([]);
+  const [joinedMembers, setJoinedMembers] = useState<HouseholdMember[]>([]);
 
   const handleCreate = async () => {
     if (!pin || pin.length < 4) { setError('PIN must be at least 4 digits'); return; }
@@ -81,7 +81,7 @@ const SetupPage: React.FC = () => {
     setStep('pick-user');
   };
 
-  const pickUser = (member: any) => {
+  const pickUser = (member: HouseholdMember) => {
     setHouseholdId(createdHouseholdId);
     setCurrentMember(member);
   };

@@ -2,11 +2,16 @@ import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { useHousehold, Completion } from '@/context/HouseholdContext';
 import TaskCard from '@/components/TaskCard';
 import { Calendar } from '@/components/ui/calendar';
+import { Progress } from '@/components/ui/progress';
+import { Badge } from '@/components/ui/badge';
 import { motion } from 'framer-motion';
 import { supabase } from '@/integrations/supabase/client';
 import { Star, Plus, Minus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { CATEGORIES } from '@/lib/constants';
+import { getDayBounds, getTaskCompletionsForDate } from '@/lib/completions';
+import { useNotifications } from '@/hooks/useNotifications';
+import { useDailyReminder } from '@/hooks/useDailyReminder';
 
 const TodayPage: React.FC = () => {
   const { tasks, completions, currentMember, members, refreshData, householdId } = useHousehold();
@@ -34,15 +39,11 @@ const TodayPage: React.FC = () => {
   }, [completions]);
 
   const startOfSelected = useMemo(() => {
-    const d = new Date(selectedDate);
-    d.setHours(0, 0, 0, 0);
-    return d;
+    return getDayBounds(selectedDate).start;
   }, [selectedDate]);
 
   const endOfSelected = useMemo(() => {
-    const d = new Date(selectedDate);
-    d.setHours(23, 59, 59, 999);
-    return d;
+    return getDayBounds(selectedDate).end;
   }, [selectedDate]);
 
   const dayPoints = useMemo(() => {
@@ -107,13 +108,26 @@ const TodayPage: React.FC = () => {
     if (!householdId) return;
     const key = `undo-${taskId}-${memberId}`;
     setLoggingTask(prev => ({ ...prev, [key]: true }));
-    // Find the most recent completion for this member+task on the selected date
-    const latest = otherDateCompletions
-      .filter(c => c.task_id === taskId && c.member_id === memberId)
-      .reduce((a, b) => a.completed_at > b.completed_at ? a : b);
-    await supabase.from('completions').delete().eq('id', latest.id);
-    await Promise.all([fetchOtherDate(), refreshData()]);
-    setLoggingTask(prev => ({ ...prev, [key]: false }));
+
+    try {
+      const taskCompletions = getTaskCompletionsForDate(otherDateCompletions, taskId, selectedDate, memberId);
+      const latest = taskCompletions.reduce<Completion | null>((currentLatest, completion) => {
+        if (!currentLatest || completion.completed_at > currentLatest.completed_at) {
+          return completion;
+        }
+
+        return currentLatest;
+      }, null);
+
+      if (!latest) {
+        return;
+      }
+
+      await supabase.from('completions').delete().eq('id', latest.id);
+      await Promise.all([fetchOtherDate(), refreshData()]);
+    } finally {
+      setLoggingTask(prev => ({ ...prev, [key]: false }));
+    }
   };
 
   const handleQuickLog = async (taskId: string, memberId: string) => {
@@ -123,19 +137,28 @@ const TodayPage: React.FC = () => {
     const key = `${taskId}-${memberId}`;
     setLoggingTask(prev => ({ ...prev, [key]: true }));
 
-    const completedAt = new Date(selectedDate);
-    completedAt.setHours(12, 0, 0, 0);
+    try {
+      const existingCompletions = getTaskCompletionsForDate(otherDateCompletions, taskId, selectedDate, memberId);
 
-    await supabase.from('completions').insert({
-      task_id: taskId,
-      household_id: householdId,
-      member_id: memberId,
-      points_earned: task.points,
-      completed_at: completedAt.toISOString(),
-    });
+      if (existingCompletions.length >= task.max_per_cycle) {
+        return;
+      }
 
-    await Promise.all([fetchOtherDate(), refreshData()]);
-    setLoggingTask(prev => ({ ...prev, [key]: false }));
+      const completedAt = new Date(selectedDate);
+      completedAt.setHours(12, 0, 0, 0);
+
+      await supabase.from('completions').insert({
+        task_id: taskId,
+        household_id: householdId,
+        member_id: memberId,
+        points_earned: task.points,
+        completed_at: completedAt.toISOString(),
+      });
+
+      await Promise.all([fetchOtherDate(), refreshData()]);
+    } finally {
+      setLoggingTask(prev => ({ ...prev, [key]: false }));
+    }
   };
 
   const dateLabel = useMemo(() => {
@@ -148,6 +171,55 @@ const TodayPage: React.FC = () => {
     return selectedDate.toLocaleDateString('en', { month: 'short', day: 'numeric', weekday: 'short' });
   }, [isToday, selectedDate]);
 
+  // Today progress (earned pts / possible pts / completed task count)
+  const todayProgress = useMemo(() => {
+    if (!isToday || !currentMember) return { earned: 0, possible: 0, completedCount: 0, totalCount: tasks.length };
+    const todayStart = getDayBounds(new Date()).start;
+    let earned = 0;
+    let completedCount = 0;
+    let possible = 0;
+    for (const task of tasks) {
+      possible += task.max_per_cycle * task.points;
+      const todayCompletions = completions.filter(
+        c => c.member_id === currentMember.id && c.task_id === task.id && new Date(c.completed_at) >= todayStart
+      );
+      earned += todayCompletions.reduce((s, c) => s + c.points_earned, 0);
+      if (todayCompletions.length > 0) completedCount++;
+    }
+    return { earned, possible, completedCount, totalCount: tasks.length };
+  }, [isToday, currentMember, tasks, completions]);
+
+  // Current streak (consecutive days with any completion, up to 90 days)
+  const currentStreak = useMemo(() => {
+    if (!currentMember) return 0;
+    let streak = 0;
+    for (let i = 0; i < 90; i++) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const { start, end } = getDayBounds(d);
+      if (completions.some(c => c.member_id === currentMember.id && new Date(c.completed_at) >= start && new Date(c.completed_at) <= end)) {
+        streak++;
+      } else {
+        break;
+      }
+    }
+    return streak;
+  }, [currentMember, completions]);
+
+  // Notification hooks
+  const { enabled: notificationsEnabled } = useNotifications();
+  const getRemainingCount = useCallback(() => {
+    if (!currentMember) return 0;
+    const todayStart = getDayBounds(new Date()).start;
+    return tasks.filter(task => {
+      const done = completions.filter(
+        c => c.member_id === currentMember.id && c.task_id === task.id && new Date(c.completed_at) >= todayStart
+      ).length;
+      return done < task.max_per_cycle;
+    }).length;
+  }, [tasks, completions, currentMember]);
+  useDailyReminder(isToday && notificationsEnabled, getRemainingCount);
+
   return (
     <div className="space-y-5">
       {/* Greeting */}
@@ -157,6 +229,52 @@ const TodayPage: React.FC = () => {
         </h1>
         <p className="text-muted-foreground text-sm mt-1">Tap a date to view or log completions</p>
       </motion.div>
+
+      {/* Today Progress */}
+      {isToday && (
+        <>
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="bg-card rounded-2xl border p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-bold text-foreground">Today's Progress</p>
+              {currentStreak >= 2 && (
+                <Badge variant="secondary" className="text-xs font-bold">
+                  🔥 {currentStreak}-day streak
+                </Badge>
+              )}
+            </div>
+            <div className="flex items-end justify-between">
+              <p className="text-2xl font-extrabold text-primary">{todayProgress.earned}<span className="text-sm font-semibold text-muted-foreground ml-1">/ {todayProgress.possible} pts</span></p>
+              <p className="text-xs text-muted-foreground">{todayProgress.completedCount}/{todayProgress.totalCount} tasks done</p>
+            </div>
+            <Progress value={todayProgress.possible > 0 ? (todayProgress.earned / todayProgress.possible) * 100 : 0} className="h-2" />
+          </motion.div>
+
+          {/* Mini achievements */}
+          {(() => {
+            const miniAchievements: { icon: string; label: string }[] = [];
+            if (currentStreak >= 3) miniAchievements.push({ icon: '🔥', label: `${currentStreak}-Day Streak` });
+            if (currentStreak >= 30) miniAchievements.push({ icon: '💎', label: 'Consistency King' });
+            const dailyTasks = tasks.filter(t => t.frequency === 'daily');
+            if (dailyTasks.length > 0) {
+              const todayStart = getDayBounds(new Date()).start;
+              const allDone = dailyTasks.every(task =>
+                completions.some(c => c.member_id === currentMember?.id && c.task_id === task.id && new Date(c.completed_at) >= todayStart)
+              );
+              if (allDone) miniAchievements.push({ icon: '🌟', label: 'Perfect Day' });
+            }
+            if (miniAchievements.length === 0) return null;
+            return (
+              <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }} className="flex flex-wrap gap-2">
+                {miniAchievements.map((a, i) => (
+                  <Badge key={i} variant="outline" className="text-xs font-semibold gap-1 px-2 py-1">
+                    <span>{a.icon}</span> {a.label}
+                  </Badge>
+                ))}
+              </motion.div>
+            );
+          })()}
+        </>
+      )}
 
       {/* Calendar */}
       <motion.div
