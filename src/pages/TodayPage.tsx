@@ -4,7 +4,7 @@ import TaskCard from '@/components/TaskCard';
 import { Calendar } from '@/components/ui/calendar';
 import { motion } from 'framer-motion';
 import { supabase } from '@/integrations/supabase/client';
-import { Star, Plus } from 'lucide-react';
+import { Star, Plus, Minus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { CATEGORIES } from '@/lib/constants';
 
@@ -102,6 +102,19 @@ const TodayPage: React.FC = () => {
       fetchOtherDate();
     }
   }, [selectedDate, isToday, fetchOtherDate]);
+
+  const handleQuickUndo = async (taskId: string, memberId: string) => {
+    if (!householdId) return;
+    const key = `undo-${taskId}-${memberId}`;
+    setLoggingTask(prev => ({ ...prev, [key]: true }));
+    // Find the most recent completion for this member+task on the selected date
+    const latest = otherDateCompletions
+      .filter(c => c.task_id === taskId && c.member_id === memberId)
+      .reduce((a, b) => a.completed_at > b.completed_at ? a : b);
+    await supabase.from('completions').delete().eq('id', latest.id);
+    await Promise.all([fetchOtherDate(), refreshData()]);
+    setLoggingTask(prev => ({ ...prev, [key]: false }));
+  };
 
   const handleQuickLog = async (taskId: string, memberId: string) => {
     if (!householdId) return;
@@ -284,23 +297,38 @@ const TodayPage: React.FC = () => {
                                 );
                               })}
                             </div>
-                            {/* Quick log buttons */}
-                            <div className="flex gap-2 mt-3">
+                            {/* Quick log + undo buttons */}
+                            <div className="flex flex-wrap gap-2 mt-3">
                               {members.map(m => {
-                                const key = `${task.id}-${m.id}`;
+                                const logKey = `${task.id}-${m.id}`;
+                                const undoKey = `undo-${task.id}-${m.id}`;
+                                const hasEntry = !!(taskStats[m.id]?.count);
                                 return (
-                                  <Button
-                                    key={m.id}
-                                    variant="outline"
-                                    size="sm"
-                                    className="text-xs h-7 px-3"
-                                    disabled={loggingTask[key]}
-                                    onClick={() => handleQuickLog(task.id, m.id)}
-                                    style={{ borderColor: m.avatar_color, color: m.avatar_color }}
-                                  >
-                                    <Plus className="w-3 h-3 mr-1" />
-                                    {m.display_name.split(' ')[0]}
-                                  </Button>
+                                  <div key={m.id} className="flex gap-1">
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="text-xs h-7 px-3"
+                                      disabled={loggingTask[logKey]}
+                                      onClick={() => handleQuickLog(task.id, m.id)}
+                                      style={{ borderColor: m.avatar_color, color: m.avatar_color }}
+                                    >
+                                      <Plus className="w-3 h-3 mr-1" />
+                                      {m.display_name.split(' ')[0]}
+                                    </Button>
+                                    {hasEntry && (
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="text-xs h-7 w-7 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                                        disabled={loggingTask[undoKey]}
+                                        onClick={() => handleQuickUndo(task.id, m.id)}
+                                        title={`Undo last ${m.display_name.split(' ')[0]} entry`}
+                                      >
+                                        <Minus className="w-3 h-3" />
+                                      </Button>
+                                    )}
+                                  </div>
                                 );
                               })}
                             </div>
