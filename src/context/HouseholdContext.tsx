@@ -13,6 +13,7 @@ export interface Task {
   household_id: string;
   name: string;
   icon: string;
+  category: string;
   frequency: string;
   frequency_value: number | null;
   max_per_cycle: number;
@@ -76,14 +77,14 @@ export const useHousehold = () => {
 };
 
 const SEED_TASKS = [
-  { name: 'Walk the dog', icon: '🐕', frequency: 'daily', frequency_value: 1, max_per_cycle: 5, points: 5, color_tag: '#0D9488' },
-  { name: 'Feed the dog', icon: '🍖', frequency: 'daily', frequency_value: 1, max_per_cycle: 2, points: 3, color_tag: '#0D9488' },
-  { name: 'Sweep floor', icon: '🧹', frequency: 'daily', frequency_value: 1, max_per_cycle: 2, points: 4, color_tag: '#F59E0B' },
-  { name: 'Mop floor', icon: '🪣', frequency: 'daily', frequency_value: 1, max_per_cycle: 2, points: 6, color_tag: '#F59E0B' },
-  { name: 'Grocery shopping', icon: '🛒', frequency: 'weekly', frequency_value: 2, max_per_cycle: 1, points: 10, color_tag: '#8B5CF6' },
-  { name: 'Clean toilet', icon: '🚽', frequency: 'weekly', frequency_value: 2, max_per_cycle: 1, points: 8, color_tag: '#EC4899' },
-  { name: 'Do laundry', icon: '👕', frequency: 'weekly', frequency_value: 1, max_per_cycle: 1, points: 7, color_tag: '#3B82F6' },
-  { name: 'Take out trash', icon: '🗑️', frequency: 'weekly', frequency_value: 1, max_per_cycle: 1, points: 5, color_tag: '#6B7280' },
+  { name: 'Walk the dog',    icon: '🐕',  category: 'dog',         frequency: 'daily',  frequency_value: 1, max_per_cycle: 5, points: 5,  color_tag: '#0D9488' },
+  { name: 'Feed the dog',    icon: '🍖',  category: 'dog',         frequency: 'daily',  frequency_value: 1, max_per_cycle: 2, points: 3,  color_tag: '#0D9488' },
+  { name: 'Sweep floor',     icon: '🧹',  category: 'living_room', frequency: 'daily',  frequency_value: 1, max_per_cycle: 2, points: 4,  color_tag: '#F59E0B' },
+  { name: 'Mop floor',       icon: '🪣',  category: 'living_room', frequency: 'daily',  frequency_value: 1, max_per_cycle: 2, points: 6,  color_tag: '#F59E0B' },
+  { name: 'Grocery shopping',icon: '🛒',  category: 'kitchen',     frequency: 'weekly', frequency_value: 2, max_per_cycle: 1, points: 10, color_tag: '#8B5CF6' },
+  { name: 'Clean toilet',    icon: '🚽',  category: 'bathroom',    frequency: 'weekly', frequency_value: 2, max_per_cycle: 1, points: 8,  color_tag: '#EC4899' },
+  { name: 'Do laundry',      icon: '👕',  category: 'bedroom',     frequency: 'weekly', frequency_value: 1, max_per_cycle: 1, points: 7,  color_tag: '#3B82F6' },
+  { name: 'Take out trash',  icon: '🗑️', category: 'living_room', frequency: 'weekly', frequency_value: 1, max_per_cycle: 1, points: 5,  color_tag: '#6B7280' },
 ];
 
 export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {

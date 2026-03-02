@@ -6,6 +6,7 @@ import { motion } from 'framer-motion';
 import { supabase } from '@/integrations/supabase/client';
 import { Star, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { CATEGORIES } from '@/pages/TasksPage';
 
 const TodayPage: React.FC = () => {
   const { tasks, completions, currentMember, members, refreshData, householdId } = useHousehold();
@@ -195,92 +196,112 @@ const TodayPage: React.FC = () => {
       </div>
 
       {/* Task section */}
-      {isToday ? (
-        <div className="space-y-3">
-          <h2 className="text-lg font-bold text-foreground">Today's Tasks</h2>
-          {tasks.map((task, i) => (
-            <motion.div key={task.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}>
-              <TaskCard task={task} onComplete={refreshData} />
+      <div className="space-y-5">
+        <h2 className="text-lg font-bold text-foreground">
+          {isToday ? "Today's Tasks" : 'Tasks that day'}
+        </h2>
+
+        {tasks.length === 0 && (
+          <p className="text-center text-muted-foreground py-8">No tasks yet. Add some in the Tasks tab!</p>
+        )}
+
+        {loadingOther && !isToday && (
+          <p className="text-muted-foreground text-sm py-4 text-center">Loading...</p>
+        )}
+
+        {(!loadingOther || isToday) && CATEGORIES
+          .map(cat => ({ ...cat, tasks: tasks.filter(t => (t.category ?? 'other') === cat.value) }))
+          .filter(g => g.tasks.length > 0)
+          .map((group, gi) => (
+            <motion.div
+              key={group.value}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: gi * 0.04 }}
+            >
+              {/* Category header */}
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-base">{group.emoji}</span>
+                <h3 className="font-semibold text-foreground text-sm">{group.label}</h3>
+                <div className="flex-1 h-px bg-border" />
+              </div>
+
+              <div className="space-y-2">
+                {isToday
+                  ? group.tasks.map((task, i) => (
+                      <motion.div
+                        key={task.id}
+                        initial={{ opacity: 0, y: 6 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: gi * 0.04 + i * 0.04 }}
+                      >
+                        <TaskCard task={task} onComplete={refreshData} />
+                      </motion.div>
+                    ))
+                  : group.tasks.map((task, i) => {
+                      const taskCompletions = otherDateCompletions.filter(c => c.task_id === task.id);
+                      return (
+                        <motion.div
+                          key={task.id}
+                          initial={{ opacity: 0, y: 6 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: gi * 0.04 + i * 0.04 }}
+                          className="bg-card rounded-2xl border p-4 shadow-sm"
+                        >
+                          <div className="flex items-start gap-3">
+                            <div className="text-3xl flex-shrink-0">{task.icon}</div>
+                            <div className="flex-1 min-w-0">
+                              <h3 className="font-bold text-foreground truncate">{task.name}</h3>
+                              <div className="flex items-center gap-2 mt-0.5">
+                                <Star className="w-3.5 h-3.5 text-amber-500" />
+                                <span className="text-sm font-semibold text-amber-600">{task.points} pts each</span>
+                              </div>
+                              {/* Who completed it */}
+                              <div className="mt-2 space-y-0.5">
+                                {members.map(m => {
+                                  const count = taskCompletions.filter(c => c.member_id === m.id).length;
+                                  const pts = taskCompletions.filter(c => c.member_id === m.id).reduce((s, c) => s + c.points_earned, 0);
+                                  if (count === 0) return (
+                                    <p key={m.id} className="text-xs text-muted-foreground">{m.display_name.split(' ')[0]}: none</p>
+                                  );
+                                  return (
+                                    <p key={m.id} className="text-xs font-semibold" style={{ color: m.avatar_color }}>
+                                      {m.display_name.split(' ')[0]} ×{count} (+{pts} pts)
+                                    </p>
+                                  );
+                                })}
+                              </div>
+                              {/* Quick log buttons */}
+                              <div className="flex gap-2 mt-3">
+                                {members.map(m => {
+                                  const key = `${task.id}-${m.id}`;
+                                  return (
+                                    <Button
+                                      key={m.id}
+                                      variant="outline"
+                                      size="sm"
+                                      className="text-xs h-7 px-3"
+                                      disabled={loggingTask[key]}
+                                      onClick={() => handleQuickLog(task.id, m.id)}
+                                      style={{ borderColor: m.avatar_color, color: m.avatar_color }}
+                                    >
+                                      <Plus className="w-3 h-3 mr-1" />
+                                      {m.display_name.split(' ')[0]}
+                                    </Button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          </div>
+                        </motion.div>
+                      );
+                    })
+                }
+              </div>
             </motion.div>
-          ))}
-          {tasks.length === 0 && (
-            <p className="text-center text-muted-foreground py-8">No tasks yet. Add some in the Tasks tab!</p>
-          )}
-        </div>
-      ) : (
-        <div className="space-y-3">
-          <h2 className="text-lg font-bold text-foreground">Tasks that day</h2>
-          {loadingOther ? (
-            <p className="text-muted-foreground text-sm py-4 text-center">Loading...</p>
-          ) : (
-            tasks.map((task, i) => {
-              const taskCompletions = otherDateCompletions.filter(c => c.task_id === task.id);
-              return (
-                <motion.div
-                  key={task.id}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: i * 0.05 }}
-                  className="bg-card rounded-2xl border p-4 shadow-sm"
-                >
-                  <div className="flex items-start gap-3">
-                    <div className="text-3xl flex-shrink-0">{task.icon}</div>
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-bold text-foreground truncate">{task.name}</h3>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <Star className="w-3.5 h-3.5 text-amber-500" />
-                        <span className="text-sm font-semibold text-amber-600">{task.points} pts each</span>
-                      </div>
-                      {/* Who completed it */}
-                      <div className="mt-2 space-y-0.5">
-                        {members.map(m => {
-                          const count = taskCompletions.filter(c => c.member_id === m.id).length;
-                          const pts = taskCompletions.filter(c => c.member_id === m.id).reduce((s, c) => s + c.points_earned, 0);
-                          if (count === 0) {
-                            return (
-                              <p key={m.id} className="text-xs text-muted-foreground">
-                                {m.display_name.split(' ')[0]}: none
-                              </p>
-                            );
-                          }
-                          return (
-                            <p key={m.id} className="text-xs font-semibold" style={{ color: m.avatar_color }}>
-                              {m.display_name.split(' ')[0]} ×{count} (+{pts} pts)
-                            </p>
-                          );
-                        })}
-                      </div>
-                      {/* Quick log buttons */}
-                      <div className="flex gap-2 mt-3">
-                        {members.map(m => {
-                          const key = `${task.id}-${m.id}`;
-                          return (
-                            <Button
-                              key={m.id}
-                              variant="outline"
-                              size="sm"
-                              className="text-xs h-7 px-3"
-                              disabled={loggingTask[key]}
-                              onClick={() => handleQuickLog(task.id, m.id)}
-                              style={{ borderColor: m.avatar_color, color: m.avatar_color }}
-                            >
-                              <Plus className="w-3 h-3 mr-1" />
-                              {m.display_name.split(' ')[0]}
-                            </Button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                </motion.div>
-              );
-            })
-          )}
-          {tasks.length === 0 && !loadingOther && (
-            <p className="text-center text-muted-foreground py-8">No tasks yet.</p>
-          )}
-        </div>
-      )}
+          ))
+        }
+      </div>
     </div>
   );
 };
