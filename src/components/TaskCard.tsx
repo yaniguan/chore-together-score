@@ -3,7 +3,7 @@ import { useHousehold, Task, Completion } from '@/context/HouseholdContext';
 import { supabase } from '@/integrations/supabase/client';
 import { motion } from 'framer-motion';
 import confetti from 'canvas-confetti';
-import { Check, Star } from 'lucide-react';
+import { Check, Star, Minus } from 'lucide-react';
 import { useState } from 'react';
 
 const getTodayCompletions = (completions: Completion[], taskId: string, memberId?: string) => {
@@ -30,11 +30,11 @@ const TaskCard: React.FC<{ task: Task; onComplete?: () => void }> = ({ task, onC
   );
 
   const canComplete = todayMyCompletions.length < task.max_per_cycle;
+  const canUndo = todayMyCompletions.length > 0;
 
   const handleComplete = async () => {
     if (!canComplete || !currentMember || !householdId) return;
 
-    // Fire confetti
     confetti({
       particleCount: 30,
       spread: 60,
@@ -49,11 +49,18 @@ const TaskCard: React.FC<{ task: Task; onComplete?: () => void }> = ({ task, onC
       points_earned: task.points,
     });
 
-    // Immediately refresh data
     onComplete?.();
   };
 
-  const otherMember = members.find(m => m.id !== currentMember?.id);
+  const handleUndo = async () => {
+    if (!canUndo || !currentMember) return;
+    // Delete the most recent completion for this member+task today
+    const latest = todayMyCompletions.reduce((a, b) =>
+      new Date(a.completed_at) > new Date(b.completed_at) ? a : b
+    );
+    await supabase.from('completions').delete().eq('id', latest.id);
+    onComplete?.();
+  };
 
   return (
     <motion.div
@@ -89,6 +96,20 @@ const TaskCard: React.FC<{ task: Task; onComplete?: () => void }> = ({ task, onC
             </div>
           )}
         </div>
+
+        {/* Undo button — only shown when current member has logged at least once today */}
+        {canUndo && (
+          <motion.button
+            whileTap={{ scale: 0.85 }}
+            onClick={handleUndo}
+            className="w-10 h-10 rounded-xl flex items-center justify-center text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors flex-shrink-0"
+            title="Undo last completion"
+          >
+            <Minus className="w-4 h-4" />
+          </motion.button>
+        )}
+
+        {/* Complete button */}
         <motion.button
           whileTap={{ scale: 0.85 }}
           onClick={handleComplete}
