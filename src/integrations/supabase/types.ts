@@ -176,6 +176,93 @@ export type Database = {
           },
         ]
       }
+      rewards: {
+        Row: {
+          id: string
+          household_id: string
+          name: string
+          icon: string
+          points_cost: number
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          household_id: string
+          name: string
+          icon?: string
+          points_cost: number
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          household_id?: string
+          name?: string
+          icon?: string
+          points_cost?: number
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "rewards_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      redemptions: {
+        Row: {
+          id: string
+          household_id: string
+          member_id: string
+          reward_id: string | null
+          reward_name: string
+          points_spent: number
+          redeemed_at: string
+        }
+        Insert: {
+          id?: string
+          household_id: string
+          member_id: string
+          reward_id?: string | null
+          reward_name: string
+          points_spent: number
+          redeemed_at?: string
+        }
+        Update: {
+          id?: string
+          household_id?: string
+          member_id?: string
+          reward_id?: string | null
+          reward_name?: string
+          points_spent?: number
+          redeemed_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "redemptions_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "redemptions_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
+            referencedRelation: "household_members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "redemptions_reward_id_fkey"
+            columns: ["reward_id"]
+            isOneToOne: false
+            referencedRelation: "rewards"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never

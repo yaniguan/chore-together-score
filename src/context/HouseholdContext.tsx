@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 
 export interface HouseholdMember {
@@ -32,12 +32,35 @@ export interface Completion {
   completed_at: string;
 }
 
+export interface Reward {
+  id: string;
+  household_id: string;
+  name: string;
+  icon: string;
+  points_cost: number;
+  created_at: string;
+}
+
+export interface Redemption {
+  id: string;
+  household_id: string;
+  member_id: string;
+  reward_id: string | null;
+  reward_name: string;
+  points_spent: number;
+  redeemed_at: string;
+}
+
 interface HouseholdContextType {
   householdId: string | null;
   currentMember: HouseholdMember | null;
   members: HouseholdMember[];
   tasks: Task[];
   completions: Completion[];
+  allTimePoints: Record<string, number>;
+  rewards: Reward[];
+  redemptions: Redemption[];
+  availablePoints: Record<string, number>;
   setCurrentMember: (member: HouseholdMember) => void;
   setHouseholdId: (id: string) => void;
   logout: () => void;
@@ -72,6 +95,9 @@ export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [members, setMembers] = useState<HouseholdMember[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [completions, setCompletions] = useState<Completion[]>([]);
+  const [allTimePoints, setAllTimePoints] = useState<Record<string, number>>({});
+  const [rewards, setRewards] = useState<Reward[]>([]);
+  const [redemptions, setRedemptions] = useState<Redemption[]>([]);
 
   const setHouseholdId = (id: string) => {
     localStorage.setItem('homepace_household_id', id);
@@ -91,20 +117,43 @@ export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setMembers([]);
     setTasks([]);
     setCompletions([]);
+    setAllTimePoints({});
+    setRewards([]);
+    setRedemptions([]);
   };
 
   const refreshData = useCallback(async () => {
     if (!householdId) return;
 
-    const [membersRes, tasksRes, completionsRes] = await Promise.all([
+    const ninetyDaysAgo = new Date();
+    ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+
+    const [membersRes, tasksRes, completionsRes, allPtsRes, rewardsRes, redemptionsRes] = await Promise.all([
       supabase.from('household_members').select('*').eq('household_id', householdId),
       supabase.from('tasks').select('*').eq('household_id', householdId).order('created_at'),
-      supabase.from('completions').select('*').eq('household_id', householdId).order('completed_at', { ascending: false }),
+      supabase.from('completions').select('*')
+        .eq('household_id', householdId)
+        .gte('completed_at', ninetyDaysAgo.toISOString())
+        .order('completed_at', { ascending: false }),
+      supabase.from('completions').select('member_id, points_earned').eq('household_id', householdId),
+      supabase.from('rewards').select('*').eq('household_id', householdId).order('created_at'),
+      supabase.from('redemptions').select('*').eq('household_id', householdId).order('redeemed_at', { ascending: false }),
     ]);
 
     if (membersRes.data) setMembers(membersRes.data as HouseholdMember[]);
     if (tasksRes.data) setTasks(tasksRes.data as Task[]);
     if (completionsRes.data) setCompletions(completionsRes.data as Completion[]);
+
+    if (allPtsRes.data) {
+      const pts: Record<string, number> = {};
+      for (const row of allPtsRes.data) {
+        pts[row.member_id] = (pts[row.member_id] ?? 0) + row.points_earned;
+      }
+      setAllTimePoints(pts);
+    }
+
+    if (rewardsRes.data) setRewards(rewardsRes.data as Reward[]);
+    if (redemptionsRes.data) setRedemptions(redemptionsRes.data as Redemption[]);
   }, [householdId]);
 
   // Seed tasks for new household
@@ -135,14 +184,30 @@ export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks', filter: `household_id=eq.${householdId}` }, () => refreshData())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'completions', filter: `household_id=eq.${householdId}` }, () => refreshData())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'household_members', filter: `household_id=eq.${householdId}` }, () => refreshData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'rewards', filter: `household_id=eq.${householdId}` }, () => refreshData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'redemptions', filter: `household_id=eq.${householdId}` }, () => refreshData())
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
   }, [householdId, refreshData]);
 
+  // availablePoints = allTimePoints - sum of redemptions per member
+  const availablePoints = useMemo(() => {
+    const spent: Record<string, number> = {};
+    for (const r of redemptions) {
+      spent[r.member_id] = (spent[r.member_id] ?? 0) + r.points_spent;
+    }
+    const result: Record<string, number> = {};
+    for (const memberId of Object.keys(allTimePoints)) {
+      result[memberId] = (allTimePoints[memberId] ?? 0) - (spent[memberId] ?? 0);
+    }
+    return result;
+  }, [allTimePoints, redemptions]);
+
   return (
     <HouseholdContext.Provider value={{
       householdId, currentMember, members, tasks, completions,
+      allTimePoints, rewards, redemptions, availablePoints,
       setCurrentMember, setHouseholdId, logout, refreshData,
     }}>
       {children}

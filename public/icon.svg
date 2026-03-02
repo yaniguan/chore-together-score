@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Background circle -->
+  <rect width="512" height="512" rx="112" fill="#0D9488"/>
+  <!-- House shape -->
+  <polygon points="256,100 420,230 420,420 300,420 300,320 212,320 212,420 92,420 92,230" fill="white" opacity="0.15"/>
+  <!-- Checkmark / star -->
+  <text x="256" y="330" font-family="system-ui" font-size="220" text-anchor="middle" fill="white">🏠</text>
+</svg>

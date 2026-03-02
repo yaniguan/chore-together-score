@@ -1,13 +1,14 @@
 import React from 'react';
 import { useHousehold } from '@/context/HouseholdContext';
 import { NavLink, useLocation } from 'react-router-dom';
-import { Home, BarChart3, ListTodo, Settings, LogOut } from 'lucide-react';
+import { Home, BarChart3, ListTodo, Settings, LogOut, Gift } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 const navItems = [
   { path: '/', icon: Home, label: 'Today' },
   { path: '/dashboard', icon: BarChart3, label: 'Dashboard' },
   { path: '/tasks', icon: ListTodo, label: 'Tasks' },
+  { path: '/rewards', icon: Gift, label: 'Rewards' },
   { path: '/settings', icon: Settings, label: 'Settings' },
 ];
 
