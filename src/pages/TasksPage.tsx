@@ -9,7 +9,26 @@ import { Plus, Pencil, Trash2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { CATEGORIES, CategoryValue } from '@/lib/constants';
 
-const EMOJI_OPTIONS = ['🏠', '🐕', '🍖', '🧹', '🪣', '🛒', '🚽', '👕', '🗑️', '🍳', '🧽', '🪴', '🚿', '🧺', '🍽️', '🛏️', '💊', '📬', '🧴', '🪥', '🫧', '🧹', '🪟', '🌿'];
+const EMOJI_OPTIONS = [
+  // Cleaning
+  '🧹', '🧽', '🪣', '🧴', '🫧', '🧺', '🪥', '🧻', '🗑️', '🪠', '🫙', '🪟',
+  // Kitchen & Cooking
+  '🍳', '🍽️', '🥄', '☕', '🫖', '🥘', '🫕', '🧂', '🍱', '🥗', '🔪', '🍵',
+  // Bathroom
+  '🚿', '🛁', '🚽', '🪒',
+  // Bedroom & Laundry
+  '🛏️', '👕', '👔', '🧣', '🪡',
+  // Shopping & Errands
+  '🛒', '🛍️', '📬', '💊', '📦', '🔑',
+  // Outdoor & Garden
+  '🌿', '🪴', '🌱', '🌻', '🍀', '🌳', '🌾', '🪺',
+  // Pets
+  '🐕', '🐈', '🐾', '🦮', '🐠', '🐇', '🐓', '🍖',
+  // Food & Groceries
+  '🥦', '🥛', '🍎', '🥩', '🥚', '🧃',
+  // Home & Utilities
+  '🏠', '🔧', '🔨', '💡', '⚡', '🧯', '🚪', '🔌',
+];
 const COLOR_OPTIONS = ['#0D9488', '#F97066', '#F59E0B', '#8B5CF6', '#EC4899', '#3B82F6', '#6B7280', '#10B981'];
 
 interface TaskFormData {

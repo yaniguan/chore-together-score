@@ -1,5 +1,6 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { useHousehold, Completion } from '@/context/HouseholdContext';
+import { calculateStreak } from '@/lib/completions';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   LineChart, Line, CartesianGrid, Legend, Cell, ReferenceLine,
@@ -163,11 +164,28 @@ const DashboardPage: React.FC = () => {
   // ── Achievements ──────────────────────────────────────────────────────────
   const achievements = useMemo(() => {
     const badges: { icon: string; label: string; member: string; color: string; stat?: string }[] = [];
+
+    // Pre-build a Set for O(1) "did member complete anything on day D?" lookups.
+    // Key: `${memberId}:${YYYY-MM-DD}` or `${memberId}:${taskId}:${YYYY-MM-DD}`
+    const dayKey = (date: Date) =>
+      `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+    const memberDaySet = new Set<string>();
+    const memberTaskDaySet = new Set<string>();
+    for (const c of completions) {
+      const d = new Date(c.completed_at);
+      memberDaySet.add(`${c.member_id}:${dayKey(d)}`);
+      memberTaskDaySet.add(`${c.member_id}:${c.task_id}:${dayKey(d)}`);
+    }
+
+    const hadCompletionOn = (memberId: string, date: Date) =>
+      memberDaySet.has(`${memberId}:${dayKey(date)}`);
+    const hadTaskCompletionOn = (memberId: string, taskId: string, date: Date) =>
+      memberTaskDaySet.has(`${memberId}:${taskId}:${dayKey(date)}`);
+
+    // 🏆 Top Scorer This Week
     const weekStart = new Date();
     weekStart.setDate(weekStart.getDate() - weekStart.getDay());
     weekStart.setHours(0, 0, 0, 0);
-
-    // 🏆 Top Scorer This Week
     const weekScores = members
       .map(m => ({ ...m, score: completions.filter(c => c.member_id === m.id && new Date(c.completed_at) >= weekStart).reduce((s, c) => s + c.points_earned, 0) }))
       .sort((a, b) => b.score - a.score);
@@ -175,32 +193,20 @@ const DashboardPage: React.FC = () => {
       badges.push({ icon: '🏆', label: 'Top Scorer This Week', member: weekScores[0].display_name, color: weekScores[0].avatar_color, stat: `${weekScores[0].score} pts` });
     }
 
-    // 🔥 Streak badges
+    // 🔥 Streak badges — reuse calculateStreak from lib
     members.forEach(m => {
-      let streak = 0;
-      for (let i = 0; i < 90; i++) {
-        const date = new Date();
-        date.setDate(date.getDate() - i);
-        date.setHours(0, 0, 0, 0);
-        const next = new Date(date);
-        next.setDate(date.getDate() + 1);
-        if (completions.some(c => c.member_id === m.id && new Date(c.completed_at) >= date && new Date(c.completed_at) < next)) streak++;
-        else break;
-      }
+      const streak = calculateStreak(completions, m.id);
       if (streak >= 3) badges.push({ icon: '🔥', label: `${streak}-Day Streak`, member: m.display_name, color: m.avatar_color, stat: `${streak} days` });
     });
 
-    // ⚡ Task Master — same task completed 7 consecutive days
+    // ⚡ Task Master — same task completed 7 consecutive days (O(1) per day lookup)
     tasks.forEach(task => {
       members.forEach(m => {
         let taskStreak = 0;
         for (let i = 0; i < 7; i++) {
-          const date = new Date();
-          date.setDate(date.getDate() - i);
-          date.setHours(0, 0, 0, 0);
-          const next = new Date(date);
-          next.setDate(date.getDate() + 1);
-          if (completions.some(c => c.member_id === m.id && c.task_id === task.id && new Date(c.completed_at) >= date && new Date(c.completed_at) < next)) taskStreak++;
+          const d = new Date();
+          d.setDate(d.getDate() - i);
+          if (hadTaskCompletionOn(m.id, task.id, d)) taskStreak++;
           else break;
         }
         if (taskStreak >= 7) {
@@ -209,20 +215,14 @@ const DashboardPage: React.FC = () => {
       });
     });
 
-    // 🌟 Perfect Day — all daily tasks completed in any of the last 7 days
+    // 🌟 Perfect Day — all daily tasks completed in any of the last 7 days (O(1) per lookup)
     const dailyTasks = tasks.filter(t => t.frequency === 'daily');
     if (dailyTasks.length > 0) {
       members.forEach(m => {
         for (let i = 0; i < 7; i++) {
-          const date = new Date();
-          date.setDate(date.getDate() - i);
-          date.setHours(0, 0, 0, 0);
-          const next = new Date(date);
-          next.setDate(date.getDate() + 1);
-          const allDone = dailyTasks.every(task =>
-            completions.some(c => c.member_id === m.id && c.task_id === task.id && new Date(c.completed_at) >= date && new Date(c.completed_at) < next)
-          );
-          if (allDone) {
+          const d = new Date();
+          d.setDate(d.getDate() - i);
+          if (dailyTasks.every(task => hadTaskCompletionOn(m.id, task.id, d))) {
             const dateStr = i === 0 ? '今天' : i === 1 ? '昨天' : `${i}天前`;
             badges.push({ icon: '🌟', label: 'Perfect Day', member: m.display_name, color: m.avatar_color, stat: dateStr });
             break;
@@ -231,16 +231,13 @@ const DashboardPage: React.FC = () => {
       });
     }
 
-    // 💎 Consistency King — 30+ consecutive days
+    // 💎 Consistency King — 30+ consecutive days (O(1) per day lookup)
     members.forEach(m => {
       let streak = 0;
       for (let i = 0; i < 90; i++) {
-        const date = new Date();
-        date.setDate(date.getDate() - i);
-        date.setHours(0, 0, 0, 0);
-        const next = new Date(date);
-        next.setDate(date.getDate() + 1);
-        if (completions.some(c => c.member_id === m.id && new Date(c.completed_at) >= date && new Date(c.completed_at) < next)) streak++;
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        if (hadCompletionOn(m.id, d)) streak++;
         else break;
       }
       if (streak >= 30) {

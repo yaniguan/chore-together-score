@@ -33,3 +33,30 @@ export const getTaskCompletionsForDate = <T extends CompletionLike>(
     );
   });
 };
+
+// Returns the number of consecutive days (counting back from today) that
+// `memberId` has at least one completion. Pass `taskId` to restrict to a
+// specific task. `maxDays` caps the look-back window (default 90).
+export const calculateStreak = (
+  completions: CompletionLike[],
+  memberId: string,
+  taskId?: string,
+  maxDays = 90,
+): number => {
+  let streak = 0;
+  for (let i = 0; i < maxDays; i++) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const { start, end } = getDayBounds(d);
+    const hit = completions.some(
+      c =>
+        c.member_id === memberId &&
+        (!taskId || c.task_id === taskId) &&
+        new Date(c.completed_at) >= start &&
+        new Date(c.completed_at) <= end,
+    );
+    if (hit) streak++;
+    else break;
+  }
+  return streak;
+};

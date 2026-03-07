@@ -5,6 +5,12 @@ export const useDailyReminder = (
   getRemainingCount: () => number,
 ) => {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Keep a ref so the timer always reads the latest count at fire time,
+  // without needing getRemainingCount in the scheduling effect's deps.
+  const getRemainingCountRef = useRef(getRemainingCount);
+  useEffect(() => {
+    getRemainingCountRef.current = getRemainingCount;
+  });
 
   useEffect(() => {
     if (timerRef.current) {
@@ -18,13 +24,13 @@ export const useDailyReminder = (
     const target = new Date();
     target.setHours(21, 0, 0, 0);
 
-    // Already past 9pm today — skip until tomorrow (don't schedule)
+    // Already past 9 PM today — skip until tomorrow (don't schedule)
     if (now >= target) return;
 
     const msUntil = target.getTime() - now.getTime();
 
     timerRef.current = setTimeout(() => {
-      const remaining = getRemainingCount();
+      const remaining = getRemainingCountRef.current();
       if (remaining > 0) {
         new Notification('HomePace', {
           body: `还有 ${remaining} 个任务未完成，今天加把劲！`,

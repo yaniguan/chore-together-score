@@ -95,26 +95,15 @@ const RewardsPage: React.FC = () => {
     });
   }, [rewards]);
 
-  // Points progress to next unaffordable reward
+  // Points progress to next unaffordable reward (sort rewards once, not per member)
   const pointsProgress = useMemo(() => {
+    const sortedRewards = [...rewards].sort((a, b) => a.points_cost - b.points_cost);
     return members.map(m => {
       const pts = availablePoints[m.id] ?? 0;
-      const sorted = [...rewards].sort((a, b) => a.points_cost - b.points_cost);
-      const nextReward = sorted.find(r => r.points_cost > pts);
+      const nextReward = sortedRewards.find(r => r.points_cost > pts);
       return { ...m, pts, nextReward };
     });
   }, [members, rewards, availablePoints]);
-
-  // Group redemptions by date
-  const redemptionsByDate = useMemo(() => {
-    const groups: Record<string, typeof redemptions> = {};
-    for (const r of redemptions) {
-      const key = new Date(r.redeemed_at).toLocaleDateString('en', { month: 'short', day: 'numeric', year: 'numeric' });
-      if (!groups[key]) groups[key] = [];
-      groups[key].push(r);
-    }
-    return Object.entries(groups);
-  }, [redemptions]);
 
   const renderRewardCard = (reward: Reward) => {
     const canAfford = myPoints >= reward.points_cost;
@@ -231,7 +220,7 @@ const RewardsPage: React.FC = () => {
               ))}
             </TabsList>
 
-            {(['all', ...members.map(m => m.id)] as string[]).map(tabId => {
+            {['all', ...members.map(m => m.id)].map(tabId => {
               const filtered = tabId === 'all' ? redemptions : redemptions.filter(r => r.member_id === tabId);
               const byDate = filtered.reduce<Record<string, typeof redemptions>>((acc, r) => {
                 const key = new Date(r.redeemed_at).toLocaleDateString('en', { month: 'short', day: 'numeric' });

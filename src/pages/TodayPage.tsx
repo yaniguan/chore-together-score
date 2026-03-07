@@ -9,7 +9,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { Star, Plus, Minus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { CATEGORIES } from '@/lib/constants';
-import { getDayBounds, getTaskCompletionsForDate } from '@/lib/completions';
+import { getDayBounds, getTaskCompletionsForDate, calculateStreak } from '@/lib/completions';
 import { useNotifications } from '@/hooks/useNotifications';
 import { useDailyReminder } from '@/hooks/useDailyReminder';
 
@@ -38,30 +38,17 @@ const TodayPage: React.FC = () => {
     return s;
   }, [completions]);
 
-  const startOfSelected = useMemo(() => {
-    return getDayBounds(selectedDate).start;
-  }, [selectedDate]);
-
-  const endOfSelected = useMemo(() => {
-    return getDayBounds(selectedDate).end;
-  }, [selectedDate]);
+  const selectedDayBounds = useMemo(() => getDayBounds(selectedDate), [selectedDate]);
 
   const dayPoints = useMemo(() => {
-    if (isToday) {
-      return members.map(m => ({
-        ...m,
-        pts: completions
-          .filter(c => c.member_id === m.id && new Date(c.completed_at) >= startOfSelected)
-          .reduce((s, c) => s + c.points_earned, 0),
-      }));
-    }
+    const src = isToday ? completions : otherDateCompletions;
     return members.map(m => ({
       ...m,
-      pts: otherDateCompletions
+      pts: src
         .filter(c => c.member_id === m.id)
         .reduce((s, c) => s + c.points_earned, 0),
     }));
-  }, [isToday, completions, otherDateCompletions, members, startOfSelected]);
+  }, [isToday, completions, otherDateCompletions, members]);
 
   // Memoized grouped tasks (same pattern as TasksPage)
   const groupedTasks = useMemo(() =>
@@ -90,11 +77,11 @@ const TodayPage: React.FC = () => {
       .from('completions')
       .select('*')
       .eq('household_id', householdId)
-      .gte('completed_at', startOfSelected.toISOString())
-      .lte('completed_at', endOfSelected.toISOString());
+      .gte('completed_at', selectedDayBounds.start.toISOString())
+      .lte('completed_at', selectedDayBounds.end.toISOString());
     if (data) setOtherDateCompletions(data as Completion[]);
     setLoadingOther(false);
-  }, [isToday, householdId, startOfSelected, endOfSelected]);
+  }, [isToday, householdId, selectedDayBounds]);
 
   useEffect(() => {
     if (isToday) {
@@ -190,21 +177,27 @@ const TodayPage: React.FC = () => {
   }, [isToday, currentMember, tasks, completions]);
 
   // Current streak (consecutive days with any completion, up to 90 days)
-  const currentStreak = useMemo(() => {
-    if (!currentMember) return 0;
-    let streak = 0;
-    for (let i = 0; i < 90; i++) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      const { start, end } = getDayBounds(d);
-      if (completions.some(c => c.member_id === currentMember.id && new Date(c.completed_at) >= start && new Date(c.completed_at) <= end)) {
-        streak++;
-      } else {
-        break;
-      }
+  const currentStreak = useMemo(
+    () => (currentMember ? calculateStreak(completions, currentMember.id) : 0),
+    [currentMember, completions],
+  );
+
+  // Mini achievements for the current member (only shown when isToday)
+  const miniAchievements = useMemo(() => {
+    if (!isToday || !currentMember) return [];
+    const badges: { icon: string; label: string }[] = [];
+    if (currentStreak >= 3) badges.push({ icon: '🔥', label: `${currentStreak}-Day Streak` });
+    if (currentStreak >= 30) badges.push({ icon: '💎', label: 'Consistency King' });
+    const dailyTasks = tasks.filter(t => t.frequency === 'daily');
+    if (dailyTasks.length > 0) {
+      const todayStart = getDayBounds(new Date()).start;
+      const allDone = dailyTasks.every(task =>
+        completions.some(c => c.member_id === currentMember.id && c.task_id === task.id && new Date(c.completed_at) >= todayStart)
+      );
+      if (allDone) badges.push({ icon: '🌟', label: 'Perfect Day' });
     }
-    return streak;
-  }, [currentMember, completions]);
+    return badges;
+  }, [isToday, currentMember, currentStreak, tasks, completions]);
 
   // Notification hooks
   const { enabled: notificationsEnabled } = useNotifications();
@@ -250,29 +243,15 @@ const TodayPage: React.FC = () => {
           </motion.div>
 
           {/* Mini achievements */}
-          {(() => {
-            const miniAchievements: { icon: string; label: string }[] = [];
-            if (currentStreak >= 3) miniAchievements.push({ icon: '🔥', label: `${currentStreak}-Day Streak` });
-            if (currentStreak >= 30) miniAchievements.push({ icon: '💎', label: 'Consistency King' });
-            const dailyTasks = tasks.filter(t => t.frequency === 'daily');
-            if (dailyTasks.length > 0) {
-              const todayStart = getDayBounds(new Date()).start;
-              const allDone = dailyTasks.every(task =>
-                completions.some(c => c.member_id === currentMember?.id && c.task_id === task.id && new Date(c.completed_at) >= todayStart)
-              );
-              if (allDone) miniAchievements.push({ icon: '🌟', label: 'Perfect Day' });
-            }
-            if (miniAchievements.length === 0) return null;
-            return (
-              <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }} className="flex flex-wrap gap-2">
-                {miniAchievements.map((a, i) => (
-                  <Badge key={i} variant="outline" className="text-xs font-semibold gap-1 px-2 py-1">
-                    <span>{a.icon}</span> {a.label}
-                  </Badge>
-                ))}
-              </motion.div>
-            );
-          })()}
+          {miniAchievements.length > 0 && (
+            <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }} className="flex flex-wrap gap-2">
+              {miniAchievements.map((a, i) => (
+                <Badge key={i} variant="outline" className="text-xs font-semibold gap-1 px-2 py-1">
+                  <span>{a.icon}</span> {a.label}
+                </Badge>
+              ))}
+            </motion.div>
+          )}
         </>
       )}
 
@@ -371,7 +350,7 @@ const TodayPage: React.FC = () => {
               <div className="flex-1 h-px bg-border" />
             </div>
 
-            <div className="space-y-2">
+            <div className={isToday ? "grid grid-cols-3 gap-2" : "space-y-2"}>
               {isToday
                 ? group.tasks.map((task, i) => (
                     <motion.div
@@ -380,7 +359,7 @@ const TodayPage: React.FC = () => {
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: gi * 0.04 + i * 0.04 }}
                     >
-                      <TaskCard task={task} onComplete={refreshData} />
+                      <TaskCard task={task} onComplete={refreshData} compact />
                     </motion.div>
                   ))
                 : group.tasks.map((task, i) => {

@@ -6,7 +6,7 @@ import confetti from 'canvas-confetti';
 import { Check, Star, Minus } from 'lucide-react';
 import { getTaskCompletionsForDate } from '@/lib/completions';
 
-const TaskCard: React.FC<{ task: Task; onComplete?: () => void }> = ({ task, onComplete }) => {
+const TaskCard: React.FC<{ task: Task; onComplete?: () => void; compact?: boolean }> = ({ task, onComplete, compact }) => {
   const { currentMember, completions, householdId, members } = useHousehold();
 
   const todayMyCompletions = useMemo(() =>
@@ -59,6 +59,62 @@ const TaskCard: React.FC<{ task: Task; onComplete?: () => void }> = ({ task, onC
     await supabase.from('completions').delete().eq('id', latest.id);
     onComplete?.();
   };
+
+  if (compact) {
+    return (
+      <motion.div
+        layout
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="bg-card rounded-xl border p-2 flex flex-col gap-1 shadow-sm h-full"
+      >
+        <div className="text-2xl text-center leading-none mt-1">{task.icon}</div>
+        <p className="text-[10px] font-bold text-foreground text-center line-clamp-2 leading-tight min-h-[28px]">{task.name}</p>
+        <div className="flex items-center justify-center gap-0.5">
+          <Star className="w-2.5 h-2.5 text-amber-500" />
+          <span className="text-[9px] font-semibold text-amber-600">{task.points}pts</span>
+          <span className="text-[9px] text-muted-foreground ml-1">{todayAllCompletions.length}/{task.max_per_cycle}</span>
+        </div>
+        {todayAllCompletions.length > 0 && (
+          <div className="flex justify-center flex-wrap gap-0.5">
+            {members.map(m => {
+              const count = memberCounts[m.id];
+              if (!count) return null;
+              return (
+                <span key={m.id} className="text-[8px] font-semibold px-1 rounded-full text-primary-foreground" style={{ backgroundColor: m.avatar_color }}>
+                  {m.display_name.split(' ')[0].charAt(0)}×{count}
+                </span>
+              );
+            })}
+          </div>
+        )}
+        <div className="flex gap-1 mt-auto pt-1">
+          {canUndo && (
+            <motion.button
+              whileTap={{ scale: 0.85 }}
+              onClick={handleUndo}
+              className="w-7 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors flex-shrink-0"
+              title="Undo"
+            >
+              <Minus className="w-3 h-3" />
+            </motion.button>
+          )}
+          <motion.button
+            whileTap={{ scale: 0.85 }}
+            onClick={handleComplete}
+            disabled={!canComplete}
+            className={`flex-1 h-8 rounded-lg flex items-center justify-center font-bold transition-all ${
+              canComplete
+                ? 'bg-primary text-primary-foreground shadow-md'
+                : 'bg-muted text-muted-foreground'
+            }`}
+          >
+            <Check className="w-4 h-4" />
+          </motion.button>
+        </div>
+      </motion.div>
+    );
+  }
 
   return (
     <motion.div
