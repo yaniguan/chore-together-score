@@ -41,7 +41,13 @@ const TodayPage: React.FC = () => {
   const selectedDayBounds = useMemo(() => getDayBounds(selectedDate), [selectedDate]);
 
   const dayPoints = useMemo(() => {
-    const src = isToday ? completions : otherDateCompletions;
+    let src;
+    if (isToday) {
+      const todayStart = getDayBounds(new Date()).start;
+      src = completions.filter(c => new Date(c.completed_at) >= todayStart);
+    } else {
+      src = otherDateCompletions;
+    }
     return members.map(m => ({
       ...m,
       pts: src
