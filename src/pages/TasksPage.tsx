@@ -99,7 +99,7 @@ const TasksPage: React.FC = () => {
     setForm({
       name: task.name,
       icon: task.icon,
-      category: task.category ?? 'other',
+      category: normalizeCategory(task.category),
       frequency: task.frequency,
       frequency_value: task.frequency_value || 1,
       max_per_cycle: task.max_per_cycle,

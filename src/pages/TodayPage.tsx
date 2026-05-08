@@ -300,10 +300,7 @@ const TodayPage: React.FC = () => {
         className="flex items-center justify-between"
       >
         <span className="text-lg font-bold text-foreground">{dateLabel}</span>
-        {!isToday && isEditable && (
-          <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded-full">Backfill mode (yesterday)</span>
-        )}
-        {!isToday && !isEditable && (
+        {!isToday && (
           <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded-full">View only · 仅可查看</span>
         )}
       </motion.div>

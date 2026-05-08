@@ -89,7 +89,8 @@ const DashboardPage: React.FC = () => {
     return chartDays.map(day => {
       const entry: PointsChartDatum = { label: day.label };
       members.forEach(m => {
-        running[m.display_name] += typeof day[m.display_name] === 'number' ? day[m.display_name] : 0;
+        const v = day[m.display_name];
+        running[m.display_name] += typeof v === 'number' ? v : 0;
         entry[m.display_name] = running[m.display_name];
       });
       return entry;
@@ -101,7 +102,11 @@ const DashboardPage: React.FC = () => {
     const [a, b] = members;
     if (!a || !b) return [];
     return chartDays.map(day => {
-      const gap = (day[a.display_name] ?? 0) - (day[b.display_name] ?? 0);
+      const av = day[a.display_name];
+      const bv = day[b.display_name];
+      const aN = typeof av === 'number' ? av : 0;
+      const bN = typeof bv === 'number' ? bv : 0;
+      const gap = aN - bN;
       return { label: day.label, gap, positive: gap >= 0 };
     });
   }, [chartDays, members]);

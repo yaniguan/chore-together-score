@@ -18,14 +18,13 @@ export const formatMonthLabel = (yearMonth: string): string => {
   return new Date(y, m - 1, 1).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long' });
 };
 
-// Edit window: only today and yesterday are mutable. Older dates are
-// view-only and the future is unreachable from the calendar.
+// Edit window: only today is mutable. Past dates are view-only (you can
+// still see what was completed, but no add/undo). The future is unreachable
+// from the calendar UI.
 export const isDateEditable = (date: Date): boolean => {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const yesterday = new Date(today);
-  yesterday.setDate(today.getDate() - 1);
   const target = new Date(date);
   target.setHours(0, 0, 0, 0);
-  return target.getTime() === today.getTime() || target.getTime() === yesterday.getTime();
+  return target.getTime() === today.getTime();
 };
