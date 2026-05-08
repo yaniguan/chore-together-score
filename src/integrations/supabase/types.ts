@@ -217,6 +217,51 @@ export type Database = {
           },
         ]
       }
+      monthly_scores: {
+        Row: {
+          id: string
+          household_id: string
+          member_id: string
+          year_month: string
+          points_earned: number
+          points_spent: number
+          finalized_at: string
+        }
+        Insert: {
+          id?: string
+          household_id: string
+          member_id: string
+          year_month: string
+          points_earned?: number
+          points_spent?: number
+          finalized_at?: string
+        }
+        Update: {
+          id?: string
+          household_id?: string
+          member_id?: string
+          year_month?: string
+          points_earned?: number
+          points_spent?: number
+          finalized_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "monthly_scores_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "monthly_scores_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
+            referencedRelation: "household_members"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       redemptions: {
         Row: {
           id: string

@@ -2,7 +2,8 @@ import React, { useState, useMemo } from 'react';
 import { useHousehold, Reward } from '@/context/HouseholdContext';
 import { supabase } from '@/integrations/supabase/client';
 import { motion } from 'framer-motion';
-import { Gift, Trash2, Plus } from 'lucide-react';
+import { Gift, Trash2, Plus, Calendar as CalendarIcon, Trophy } from 'lucide-react';
+import { formatMonthLabel, getMonthKey } from '@/lib/monthCycle';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -27,7 +28,8 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 const RewardsPage: React.FC = () => {
-  const { householdId, currentMember, members, rewards, redemptions, availablePoints, refreshData } = useHousehold();
+  const { householdId, currentMember, members, rewards, redemptions, availablePoints, monthlyScores, monthEarned, monthSpent, refreshData } = useHousehold();
+  const currentMonthLabel = formatMonthLabel(getMonthKey(new Date()));
 
   const [redeemTarget, setRedeemTarget] = useState<Reward | null>(null);
   const [showAddDialog, setShowAddDialog] = useState(false);
@@ -144,7 +146,11 @@ const RewardsPage: React.FC = () => {
 
       {/* Balance + Progress */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-card rounded-2xl border p-5 space-y-4">
-        <p className="text-sm font-semibold text-muted-foreground">Available Points</p>
+        <div className="flex items-baseline justify-between">
+          <p className="text-sm font-semibold text-muted-foreground">Available Points</p>
+          <p className="text-[11px] text-muted-foreground">{currentMonthLabel}</p>
+        </div>
+        <p className="text-[11px] text-muted-foreground -mt-2">月底将自动结算并清零，下月从 0 开始</p>
         <div className="space-y-4">
           {pointsProgress.map(m => {
             const progressPct = m.nextReward ? Math.min(100, (m.pts / m.nextReward.points_cost) * 100) : 100;
@@ -206,6 +212,85 @@ const RewardsPage: React.FC = () => {
             ))}
           </div>
         )}
+      </motion.div>
+
+      {/* Monthly History — archived per-month earnings & redemptions, plus this month's running totals */}
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="bg-card rounded-2xl border p-5">
+        <div className="flex items-center gap-2 mb-3">
+          <CalendarIcon className="w-5 h-5 text-primary" />
+          <h2 className="font-bold text-foreground">月度积分</h2>
+        </div>
+        <p className="text-[11px] text-muted-foreground mb-4">每月底自动归档双方的得分与已兑换分。下月从 0 开始累积。</p>
+
+        {(() => {
+          // Group archived rows by month + add a synthetic row for the current month from live state
+          const byMonth: Record<string, Record<string, { earned: number; spent: number }>> = {};
+          for (const row of monthlyScores) {
+            if (!byMonth[row.year_month]) byMonth[row.year_month] = {};
+            byMonth[row.year_month][row.member_id] = { earned: row.points_earned, spent: row.points_spent };
+          }
+          const currentKey = getMonthKey(new Date());
+          byMonth[currentKey] = {};
+          for (const m of members) {
+            byMonth[currentKey][m.id] = {
+              earned: monthEarned[m.id] ?? 0,
+              spent: monthSpent[m.id] ?? 0,
+            };
+          }
+          const orderedKeys = Object.keys(byMonth).sort((a, b) => b.localeCompare(a));
+          if (orderedKeys.length === 0) {
+            return <p className="text-sm text-muted-foreground text-center py-2">还没有归档的月份</p>;
+          }
+          return (
+            <div className="space-y-3">
+              {orderedKeys.map(ym => {
+                const isCurrent = ym === currentKey;
+                const memberRows = members.map(m => ({
+                  ...m,
+                  earned: byMonth[ym][m.id]?.earned ?? 0,
+                  spent: byMonth[ym][m.id]?.spent ?? 0,
+                }));
+                const winner = memberRows.length >= 2
+                  ? memberRows.reduce((a, b) => (a.earned >= b.earned ? a : b))
+                  : null;
+                const tied = memberRows.length >= 2 && memberRows.every(r => r.earned === memberRows[0].earned) && memberRows[0].earned > 0;
+                return (
+                  <div key={ym} className="rounded-xl border p-3">
+                    <div className="flex items-baseline justify-between mb-2">
+                      <p className="text-sm font-bold text-foreground">
+                        {formatMonthLabel(ym)}
+                        {isCurrent && <span className="ml-2 text-[10px] font-semibold text-primary bg-primary/10 px-1.5 py-0.5 rounded">本月 · 进行中</span>}
+                      </p>
+                      {!isCurrent && winner && !tied && winner.earned > 0 && (
+                        <span className="flex items-center gap-1 text-[11px] font-semibold" style={{ color: winner.avatar_color }}>
+                          <Trophy className="w-3 h-3" /> {winner.display_name.split(' ')[0]}
+                        </span>
+                      )}
+                    </div>
+                    <div className="space-y-1.5">
+                      {memberRows.map(m => (
+                        <div key={m.id} className="flex items-center gap-2 text-xs">
+                          <div className="w-5 h-5 rounded-full text-[10px] font-bold flex items-center justify-center text-primary-foreground flex-shrink-0" style={{ backgroundColor: m.avatar_color }}>
+                            {m.display_name.charAt(0)}
+                          </div>
+                          <span className="font-semibold text-foreground flex-1 truncate">{m.display_name.split(' ')[0]}</span>
+                          <span className="font-extrabold" style={{ color: m.avatar_color }}>+{m.earned}</span>
+                          <span className="text-muted-foreground">earned</span>
+                          {m.spent > 0 && (
+                            <>
+                              <span className="text-destructive font-semibold">-{m.spent}</span>
+                              <span className="text-muted-foreground">spent</span>
+                            </>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
       </motion.div>
 
       {/* Redemption History */}

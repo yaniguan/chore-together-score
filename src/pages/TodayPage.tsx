@@ -8,8 +8,9 @@ import { motion } from 'framer-motion';
 import { supabase } from '@/integrations/supabase/client';
 import { Star, Plus, Minus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { CATEGORIES } from '@/lib/constants';
+import { CATEGORIES, normalizeCategory } from '@/lib/constants';
 import { getDayBounds, getTaskCompletionsForDate, calculateStreak } from '@/lib/completions';
+import { isDateEditable } from '@/lib/monthCycle';
 import { useNotifications } from '@/hooks/useNotifications';
 import { useDailyReminder } from '@/hooks/useDailyReminder';
 
@@ -21,6 +22,7 @@ const TodayPage: React.FC = () => {
   const [loggingTask, setLoggingTask] = useState<Record<string, boolean>>({});
 
   const isToday = selectedDate.toDateString() === new Date().toDateString();
+  const isEditable = useMemo(() => isDateEditable(selectedDate), [selectedDate]);
 
   const greeting = () => {
     const hour = new Date().getHours();
@@ -59,7 +61,7 @@ const TodayPage: React.FC = () => {
   // Memoized grouped tasks (same pattern as TasksPage)
   const groupedTasks = useMemo(() =>
     CATEGORIES
-      .map(cat => ({ ...cat, tasks: tasks.filter(t => (t.category ?? 'other') === cat.value) }))
+      .map(cat => ({ ...cat, tasks: tasks.filter(t => normalizeCategory(t.category) === cat.value) }))
       .filter(g => g.tasks.length > 0),
     [tasks]
   );
@@ -98,7 +100,7 @@ const TodayPage: React.FC = () => {
   }, [selectedDate, isToday, fetchOtherDate]);
 
   const handleQuickUndo = async (taskId: string, memberId: string) => {
-    if (!householdId) return;
+    if (!householdId || !isEditable) return;
     const key = `undo-${taskId}-${memberId}`;
     setLoggingTask(prev => ({ ...prev, [key]: true }));
 
@@ -124,7 +126,7 @@ const TodayPage: React.FC = () => {
   };
 
   const handleQuickLog = async (taskId: string, memberId: string) => {
-    if (!householdId) return;
+    if (!householdId || !isEditable) return;
     const task = tasks.find(t => t.id === taskId);
     if (!task) return;
     const key = `${taskId}-${memberId}`;
@@ -298,8 +300,11 @@ const TodayPage: React.FC = () => {
         className="flex items-center justify-between"
       >
         <span className="text-lg font-bold text-foreground">{dateLabel}</span>
-        {!isToday && (
-          <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded-full">Backfill mode</span>
+        {!isToday && isEditable && (
+          <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded-full">Backfill mode (yesterday)</span>
+        )}
+        {!isToday && !isEditable && (
+          <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded-full">View only · 仅可查看</span>
         )}
       </motion.div>
 
@@ -400,41 +405,43 @@ const TodayPage: React.FC = () => {
                                 );
                               })}
                             </div>
-                            {/* Quick log + undo buttons */}
-                            <div className="flex flex-wrap gap-2 mt-3">
-                              {members.map(m => {
-                                const logKey = `${task.id}-${m.id}`;
-                                const undoKey = `undo-${task.id}-${m.id}`;
-                                const hasEntry = !!(taskStats[m.id]?.count);
-                                return (
-                                  <div key={m.id} className="flex gap-1">
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      className="text-xs h-7 px-3"
-                                      disabled={loggingTask[logKey]}
-                                      onClick={() => handleQuickLog(task.id, m.id)}
-                                      style={{ borderColor: m.avatar_color, color: m.avatar_color }}
-                                    >
-                                      <Plus className="w-3 h-3 mr-1" />
-                                      {m.display_name.split(' ')[0]}
-                                    </Button>
-                                    {hasEntry && (
+                            {/* Quick log + undo buttons — only available for editable dates */}
+                            {isEditable && (
+                              <div className="flex flex-wrap gap-2 mt-3">
+                                {members.map(m => {
+                                  const logKey = `${task.id}-${m.id}`;
+                                  const undoKey = `undo-${task.id}-${m.id}`;
+                                  const hasEntry = !!(taskStats[m.id]?.count);
+                                  return (
+                                    <div key={m.id} className="flex gap-1">
                                       <Button
-                                        variant="ghost"
+                                        variant="outline"
                                         size="sm"
-                                        className="text-xs h-7 w-7 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                                        disabled={loggingTask[undoKey]}
-                                        onClick={() => handleQuickUndo(task.id, m.id)}
-                                        title={`Undo last ${m.display_name.split(' ')[0]} entry`}
+                                        className="text-xs h-7 px-3"
+                                        disabled={loggingTask[logKey]}
+                                        onClick={() => handleQuickLog(task.id, m.id)}
+                                        style={{ borderColor: m.avatar_color, color: m.avatar_color }}
                                       >
-                                        <Minus className="w-3 h-3" />
+                                        <Plus className="w-3 h-3 mr-1" />
+                                        {m.display_name.split(' ')[0]}
                                       </Button>
-                                    )}
-                                  </div>
-                                );
-                              })}
-                            </div>
+                                      {hasEntry && (
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          className="text-xs h-7 w-7 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                                          disabled={loggingTask[undoKey]}
+                                          onClick={() => handleQuickUndo(task.id, m.id)}
+                                          title={`Undo last ${m.display_name.split(' ')[0]} entry`}
+                                        >
+                                          <Minus className="w-3 h-3" />
+                                        </Button>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
                           </div>
                         </div>
                       </motion.div>

@@ -1,6 +1,7 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { parseStoredHouseholdMember } from '@/lib/householdStorage';
+import { getMonthKey, getMonthRange } from '@/lib/monthCycle';
 
 export interface HouseholdMember {
   id: string;
@@ -54,6 +55,16 @@ export interface Redemption {
   redeemed_at: string;
 }
 
+export interface MonthlyScore {
+  id: string;
+  household_id: string;
+  member_id: string;
+  year_month: string;
+  points_earned: number;
+  points_spent: number;
+  finalized_at: string;
+}
+
 interface HouseholdContextType {
   householdId: string | null;
   currentMember: HouseholdMember | null;
@@ -63,11 +74,15 @@ interface HouseholdContextType {
   allTimePoints: Record<string, number>;
   rewards: Reward[];
   redemptions: Redemption[];
+  monthlyScores: MonthlyScore[];
+  monthEarned: Record<string, number>;
+  monthSpent: Record<string, number>;
   availablePoints: Record<string, number>;
   setCurrentMember: (member: HouseholdMember) => void;
   setHouseholdId: (id: string) => void;
   logout: () => void;
   refreshData: () => Promise<void>;
+  resetTasksToDefaults: () => Promise<void>;
 }
 
 const HouseholdContext = createContext<HouseholdContextType | null>(null);
@@ -80,15 +95,31 @@ export const useHousehold = () => {
   return ctx;
 };
 
-const SEED_TASKS = [
-  { name: 'Walk the dog',    icon: '🐕',  category: 'dog',         frequency: 'daily',  frequency_value: 1, max_per_cycle: 5, points: 5,  color_tag: '#0D9488' },
-  { name: 'Feed the dog',    icon: '🍖',  category: 'dog',         frequency: 'daily',  frequency_value: 1, max_per_cycle: 2, points: 3,  color_tag: '#0D9488' },
-  { name: 'Sweep floor',     icon: '🧹',  category: 'living_room', frequency: 'daily',  frequency_value: 1, max_per_cycle: 2, points: 4,  color_tag: '#F59E0B' },
-  { name: 'Mop floor',       icon: '🪣',  category: 'living_room', frequency: 'daily',  frequency_value: 1, max_per_cycle: 2, points: 6,  color_tag: '#F59E0B' },
-  { name: 'Grocery shopping',icon: '🛒',  category: 'kitchen',     frequency: 'weekly', frequency_value: 2, max_per_cycle: 1, points: 10, color_tag: '#8B5CF6' },
-  { name: 'Clean toilet',    icon: '🚽',  category: 'bathroom',    frequency: 'weekly', frequency_value: 2, max_per_cycle: 1, points: 8,  color_tag: '#EC4899' },
-  { name: 'Do laundry',      icon: '👕',  category: 'bedroom',     frequency: 'weekly', frequency_value: 1, max_per_cycle: 1, points: 7,  color_tag: '#3B82F6' },
-  { name: 'Take out trash',  icon: '🗑️', category: 'living_room', frequency: 'weekly', frequency_value: 1, max_per_cycle: 1, points: 5,  color_tag: '#6B7280' },
+// Default Chinese task list (categories: kitchen / bathroom / dog / other).
+export const SEED_TASKS = [
+  // 厨房 Kitchen
+  { name: '做饭',       icon: '🍳',  category: 'kitchen',  frequency: 'daily',  frequency_value: 1, max_per_cycle: 3, points: 5, color_tag: '#F59E0B' },
+  { name: '收拾',       icon: '🧽',  category: 'kitchen',  frequency: 'daily',  frequency_value: 1, max_per_cycle: 3, points: 3, color_tag: '#F59E0B' },
+  { name: '灶台',       icon: '🔥',  category: 'kitchen',  frequency: 'daily',  frequency_value: 1, max_per_cycle: 1, points: 3, color_tag: '#F59E0B' },
+  { name: '微波炉',     icon: '📦',  category: 'kitchen',  frequency: 'weekly', frequency_value: 1, max_per_cycle: 1, points: 3, color_tag: '#F59E0B' },
+  { name: '洗碗池',     icon: '🚰',  category: 'kitchen',  frequency: 'daily',  frequency_value: 1, max_per_cycle: 1, points: 4, color_tag: '#F59E0B' },
+  { name: '冰箱',       icon: '🧊',  category: 'kitchen',  frequency: 'weekly', frequency_value: 1, max_per_cycle: 1, points: 5, color_tag: '#F59E0B' },
+  { name: '大理石板',   icon: '🪨',  category: 'kitchen',  frequency: 'daily',  frequency_value: 1, max_per_cycle: 1, points: 3, color_tag: '#F59E0B' },
+  { name: '扔垃圾(厨房)', icon: '🗑️', category: 'kitchen',  frequency: 'daily',  frequency_value: 1, max_per_cycle: 2, points: 3, color_tag: '#F59E0B' },
+  // 厕所 Bathroom
+  { name: '浴缸',       icon: '🛁',  category: 'bathroom', frequency: 'weekly', frequency_value: 1, max_per_cycle: 1, points: 6, color_tag: '#EC4899' },
+  { name: '马桶',       icon: '🚽',  category: 'bathroom', frequency: 'weekly', frequency_value: 2, max_per_cycle: 1, points: 5, color_tag: '#EC4899' },
+  { name: '镜子',       icon: '🪞',  category: 'bathroom', frequency: 'weekly', frequency_value: 1, max_per_cycle: 1, points: 2, color_tag: '#EC4899' },
+  { name: '洗脸池',     icon: '🚿',  category: 'bathroom', frequency: 'weekly', frequency_value: 2, max_per_cycle: 1, points: 3, color_tag: '#EC4899' },
+  { name: '扔垃圾(厕所)', icon: '🗑️', category: 'bathroom', frequency: 'weekly', frequency_value: 2, max_per_cycle: 1, points: 2, color_tag: '#EC4899' },
+  // 狗 Dog
+  { name: '遛狗',       icon: '🐕',  category: 'dog',      frequency: 'daily',  frequency_value: 1, max_per_cycle: 3, points: 5, color_tag: '#0D9488' },
+  { name: '喂饭',       icon: '🍖',  category: 'dog',      frequency: 'daily',  frequency_value: 1, max_per_cycle: 2, points: 3, color_tag: '#0D9488' },
+  { name: '刷牙',       icon: '🪥',  category: 'dog',      frequency: 'daily',  frequency_value: 1, max_per_cycle: 1, points: 2, color_tag: '#0D9488' },
+  { name: '洗澡',       icon: '🛀',  category: 'dog',      frequency: 'weekly', frequency_value: 1, max_per_cycle: 1, points: 8, color_tag: '#0D9488' },
+  // 其他综合 Other
+  { name: '扫地',       icon: '🧹',  category: 'other',    frequency: 'daily',  frequency_value: 1, max_per_cycle: 1, points: 4, color_tag: '#6B7280' },
+  { name: '拖地',       icon: '🪣',  category: 'other',    frequency: 'weekly', frequency_value: 2, max_per_cycle: 1, points: 6, color_tag: '#6B7280' },
 ];
 
 export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -109,6 +140,7 @@ export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [allTimePoints, setAllTimePoints] = useState<Record<string, number>>({});
   const [rewards, setRewards] = useState<Reward[]>([]);
   const [redemptions, setRedemptions] = useState<Redemption[]>([]);
+  const [monthlyScores, setMonthlyScores] = useState<MonthlyScore[]>([]);
 
   const setHouseholdId = (id: string) => {
     localStorage.setItem(HOUSEHOLD_ID_STORAGE_KEY, id);
@@ -131,6 +163,7 @@ export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setAllTimePoints({});
     setRewards([]);
     setRedemptions([]);
+    setMonthlyScores([]);
   };
 
   const refreshData = useCallback(async () => {
@@ -139,7 +172,7 @@ export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const ninetyDaysAgo = new Date();
     ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
 
-    const [membersRes, tasksRes, completionsRes, allPtsRes, rewardsRes, redemptionsRes] = await Promise.all([
+    const [membersRes, tasksRes, completionsRes, allPtsRes, rewardsRes, redemptionsRes, monthlyRes] = await Promise.all([
       supabase.from('household_members').select('*').eq('household_id', householdId),
       supabase.from('tasks').select('*').eq('household_id', householdId).order('created_at'),
       supabase.from('completions').select('*')
@@ -149,6 +182,7 @@ export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       supabase.from('completions').select('member_id, points_earned').eq('household_id', householdId),
       supabase.from('rewards').select('*').eq('household_id', householdId).order('created_at'),
       supabase.from('redemptions').select('*').eq('household_id', householdId).order('redeemed_at', { ascending: false }),
+      supabase.from('monthly_scores').select('*').eq('household_id', householdId).order('year_month', { ascending: false }),
     ]);
 
     if (membersRes.data) setMembers(membersRes.data as HouseholdMember[]);
@@ -165,9 +199,9 @@ export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     if (rewardsRes.data) setRewards(rewardsRes.data as Reward[]);
     if (redemptionsRes.data) setRedemptions(redemptionsRes.data as Redemption[]);
+    if (monthlyRes.data) setMonthlyScores(monthlyRes.data as MonthlyScore[]);
   }, [householdId]);
 
-  // Seed tasks for new household
   const seedTasks = useCallback(async (hId: string) => {
     const { data: existing } = await supabase.from('tasks').select('id').eq('household_id', hId).limit(1);
     if (existing && existing.length > 0) return;
@@ -179,6 +213,88 @@ export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }));
     await supabase.from('tasks').insert(tasksToInsert);
   }, []);
+
+  const resetTasksToDefaults = useCallback(async () => {
+    if (!householdId) return;
+    // Delete current tasks (cascades to their completions). Monthly archive
+    // rows are preserved because they don't reference task ids.
+    await supabase.from('tasks').delete().eq('household_id', householdId);
+    const tasksToInsert = SEED_TASKS.map(t => ({
+      ...t,
+      household_id: householdId,
+      assigned_to: 'both',
+      created_by: currentMember?.id ?? null,
+    }));
+    await supabase.from('tasks').insert(tasksToInsert);
+    await refreshData();
+  }, [householdId, currentMember, refreshData]);
+
+  // Archive any past months that haven't been archived yet. Idempotent.
+  const archiveRunRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!householdId || members.length === 0) return;
+    // Run once per (household, current month) per page-load.
+    const runKey = `${householdId}:${getMonthKey(new Date())}`;
+    if (archiveRunRef.current === runKey) return;
+    archiveRunRef.current = runKey;
+
+    (async () => {
+      const now = new Date();
+      const startOfThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+      const [firstCRes, firstRRes, archivesRes] = await Promise.all([
+        supabase.from('completions').select('completed_at').eq('household_id', householdId).order('completed_at', { ascending: true }).limit(1),
+        supabase.from('redemptions').select('redeemed_at').eq('household_id', householdId).order('redeemed_at', { ascending: true }).limit(1),
+        supabase.from('monthly_scores').select('year_month').eq('household_id', householdId),
+      ]);
+
+      const earliestCandidates: Date[] = [];
+      if (firstCRes.data?.[0]?.completed_at) earliestCandidates.push(new Date(firstCRes.data[0].completed_at));
+      if (firstRRes.data?.[0]?.redeemed_at) earliestCandidates.push(new Date(firstRRes.data[0].redeemed_at));
+      if (earliestCandidates.length === 0) return;
+
+      const earliest = earliestCandidates.reduce((a, b) => (a < b ? a : b));
+      const archived = new Set(archivesRes.data?.map(r => r.year_month) ?? []);
+      const cursor = new Date(earliest.getFullYear(), earliest.getMonth(), 1);
+      const rowsToInsert: { household_id: string; member_id: string; year_month: string; points_earned: number; points_spent: number }[] = [];
+
+      while (cursor < startOfThisMonth) {
+        const ym = getMonthKey(cursor);
+        if (!archived.has(ym)) {
+          const { start, end } = getMonthRange(cursor);
+          const [eRes, sRes] = await Promise.all([
+            supabase.from('completions').select('member_id, points_earned')
+              .eq('household_id', householdId)
+              .gte('completed_at', start.toISOString())
+              .lt('completed_at', end.toISOString()),
+            supabase.from('redemptions').select('member_id, points_spent')
+              .eq('household_id', householdId)
+              .gte('redeemed_at', start.toISOString())
+              .lt('redeemed_at', end.toISOString()),
+          ]);
+          const eMap: Record<string, number> = {};
+          const sMap: Record<string, number> = {};
+          for (const r of eRes.data ?? []) eMap[r.member_id] = (eMap[r.member_id] ?? 0) + r.points_earned;
+          for (const r of sRes.data ?? []) sMap[r.member_id] = (sMap[r.member_id] ?? 0) + r.points_spent;
+          for (const m of members) {
+            rowsToInsert.push({
+              household_id: householdId,
+              member_id: m.id,
+              year_month: ym,
+              points_earned: eMap[m.id] ?? 0,
+              points_spent: sMap[m.id] ?? 0,
+            });
+          }
+        }
+        cursor.setMonth(cursor.getMonth() + 1);
+      }
+
+      if (rowsToInsert.length > 0) {
+        await supabase.from('monthly_scores').upsert(rowsToInsert, { onConflict: 'household_id,member_id,year_month' });
+        await refreshData();
+      }
+    })();
+  }, [householdId, members, refreshData]);
 
   useEffect(() => {
     if (householdId) {
@@ -197,29 +313,50 @@ export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       .on('postgres_changes', { event: '*', schema: 'public', table: 'household_members', filter: `household_id=eq.${householdId}` }, () => refreshData())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'rewards', filter: `household_id=eq.${householdId}` }, () => refreshData())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'redemptions', filter: `household_id=eq.${householdId}` }, () => refreshData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'monthly_scores', filter: `household_id=eq.${householdId}` }, () => refreshData())
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
   }, [householdId, refreshData]);
 
-  // availablePoints = allTimePoints - sum of redemptions per member
-  const availablePoints = useMemo(() => {
-    const spent: Record<string, number> = {};
-    for (const r of redemptions) {
-      spent[r.member_id] = (spent[r.member_id] ?? 0) + r.points_spent;
+  // Current month earned (from completions) and spent (from redemptions).
+  // availablePoints = current month earned minus current month spent — past
+  // months are frozen in monthly_scores and don't bleed into this number.
+  const monthEarned = useMemo(() => {
+    const { start, end } = getMonthRange(new Date());
+    const m: Record<string, number> = {};
+    for (const c of completions) {
+      const t = new Date(c.completed_at);
+      if (t >= start && t < end) m[c.member_id] = (m[c.member_id] ?? 0) + c.points_earned;
     }
+    return m;
+  }, [completions]);
+
+  const monthSpent = useMemo(() => {
+    const { start, end } = getMonthRange(new Date());
+    const m: Record<string, number> = {};
+    for (const r of redemptions) {
+      const t = new Date(r.redeemed_at);
+      if (t >= start && t < end) m[r.member_id] = (m[r.member_id] ?? 0) + r.points_spent;
+    }
+    return m;
+  }, [redemptions]);
+
+  const availablePoints = useMemo(() => {
     const result: Record<string, number> = {};
-    for (const memberId of Object.keys(allTimePoints)) {
-      result[memberId] = (allTimePoints[memberId] ?? 0) - (spent[memberId] ?? 0);
+    for (const m of members) {
+      result[m.id] = (monthEarned[m.id] ?? 0) - (monthSpent[m.id] ?? 0);
     }
     return result;
-  }, [allTimePoints, redemptions]);
+  }, [members, monthEarned, monthSpent]);
 
   return (
     <HouseholdContext.Provider value={{
       householdId, currentMember, members, tasks, completions,
-      allTimePoints, rewards, redemptions, availablePoints,
+      allTimePoints, rewards, redemptions, monthlyScores,
+      monthEarned, monthSpent, availablePoints,
       setCurrentMember, setHouseholdId, logout, refreshData,
+      resetTasksToDefaults,
     }}>
       {children}
     </HouseholdContext.Provider>

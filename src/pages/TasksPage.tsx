@@ -5,9 +5,19 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Plus, Pencil, Trash2 } from 'lucide-react';
+import { Plus, Pencil, Trash2, RotateCcw } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { CATEGORIES, CategoryValue } from '@/lib/constants';
+import { CATEGORIES, CategoryValue, normalizeCategory } from '@/lib/constants';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 const EMOJI_OPTIONS = [
   // Cleaning
@@ -49,10 +59,12 @@ const defaultForm: TaskFormData = {
 };
 
 const TasksPage: React.FC = () => {
-  const { tasks, householdId, members, currentMember, refreshData } = useHousehold();
+  const { tasks, householdId, members, currentMember, refreshData, resetTasksToDefaults } = useHousehold();
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<TaskFormData>(defaultForm);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetting, setResetting] = useState(false);
 
   const handleSave = async () => {
     if (!form.name.trim() || !householdId) return;
@@ -109,22 +121,42 @@ const TasksPage: React.FC = () => {
     return CATEGORIES
       .map(cat => ({
         ...cat,
-        tasks: tasks.filter(t => (t.category ?? 'other') === cat.value),
+        tasks: tasks.filter(t => normalizeCategory(t.category) === cat.value),
       }))
       .filter(g => g.tasks.length > 0);
   }, [tasks]);
 
+  const handleReset = async () => {
+    setResetting(true);
+    try {
+      await resetTasksToDefaults();
+      setResetOpen(false);
+    } finally {
+      setResetting(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2">
         <h1 className="text-2xl font-extrabold text-foreground">Tasks</h1>
 
-        <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) { setForm(defaultForm); setEditingId(null); } }}>
-          <DialogTrigger asChild>
-            <Button className="rounded-xl font-bold" size="sm">
-              <Plus className="w-4 h-4 mr-1" /> Add Task
-            </Button>
-          </DialogTrigger>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="rounded-xl"
+            onClick={() => setResetOpen(true)}
+            title="重置为默认任务列表"
+          >
+            <RotateCcw className="w-4 h-4 mr-1" /> 重置
+          </Button>
+          <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) { setForm(defaultForm); setEditingId(null); } }}>
+            <DialogTrigger asChild>
+              <Button className="rounded-xl font-bold" size="sm">
+                <Plus className="w-4 h-4 mr-1" /> Add Task
+              </Button>
+            </DialogTrigger>
           <DialogContent className="rounded-2xl max-w-sm mx-auto max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>{editingId ? 'Edit Task' : 'New Task'}</DialogTitle>
@@ -230,8 +262,26 @@ const TasksPage: React.FC = () => {
               </Button>
             </div>
           </DialogContent>
-        </Dialog>
+          </Dialog>
+        </div>
       </div>
+
+      <AlertDialog open={resetOpen} onOpenChange={setResetOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>重置为默认任务列表?</AlertDialogTitle>
+            <AlertDialogDescription>
+              此操作将删除当前所有任务，并重新加载默认任务列表（厨房、厕所、狗、其他综合）。当前任务下的本月完成记录会一并删除（已归档的过往月份不受影响）。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={resetting}>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={handleReset} disabled={resetting}>
+              {resetting ? '重置中...' : '确认重置'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Grouped task list */}
       {grouped.length === 0 && (

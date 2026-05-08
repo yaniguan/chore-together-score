@@ -20,7 +20,7 @@ type TaskBreakdownDatum = {
 };
 
 const DashboardPage: React.FC = () => {
-  const { members, tasks, completions, allTimePoints, householdId } = useHousehold();
+  const { members, tasks, completions, householdId } = useHousehold();
   const [periodTab, setPeriodTab] = useState<'30days' | 'monthly'>('30days');
   const [monthlyData, setMonthlyData] = useState<PointsChartDatum[]>([]);
   const [loadingMonthly, setLoadingMonthly] = useState(false);
