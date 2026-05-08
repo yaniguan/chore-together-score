@@ -33,6 +33,19 @@ export interface Completion {
   member_id: string;
   points_earned: number;
   completed_at: string;
+  photo_url: string | null;
+}
+
+export interface ShoppingItem {
+  id: string;
+  household_id: string;
+  name: string;
+  quantity: string | null;
+  notes: string | null;
+  added_by: string | null;
+  added_at: string;
+  completed_at: string | null;
+  completed_by: string | null;
 }
 
 export interface Reward {
@@ -75,6 +88,7 @@ interface HouseholdContextType {
   rewards: Reward[];
   redemptions: Redemption[];
   monthlyScores: MonthlyScore[];
+  shoppingItems: ShoppingItem[];
   monthEarned: Record<string, number>;
   monthSpent: Record<string, number>;
   availablePoints: Record<string, number>;
@@ -83,6 +97,7 @@ interface HouseholdContextType {
   logout: () => void;
   refreshData: () => Promise<void>;
   resetTasksToDefaults: () => Promise<void>;
+  uploadProofPhoto: (file: File) => Promise<string | null>;
 }
 
 const HouseholdContext = createContext<HouseholdContextType | null>(null);
@@ -141,6 +156,7 @@ export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [rewards, setRewards] = useState<Reward[]>([]);
   const [redemptions, setRedemptions] = useState<Redemption[]>([]);
   const [monthlyScores, setMonthlyScores] = useState<MonthlyScore[]>([]);
+  const [shoppingItems, setShoppingItems] = useState<ShoppingItem[]>([]);
 
   const setHouseholdId = (id: string) => {
     localStorage.setItem(HOUSEHOLD_ID_STORAGE_KEY, id);
@@ -164,6 +180,7 @@ export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setRewards([]);
     setRedemptions([]);
     setMonthlyScores([]);
+    setShoppingItems([]);
   };
 
   const refreshData = useCallback(async () => {
@@ -172,7 +189,7 @@ export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const ninetyDaysAgo = new Date();
     ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
 
-    const [membersRes, tasksRes, completionsRes, allPtsRes, rewardsRes, redemptionsRes, monthlyRes] = await Promise.all([
+    const [membersRes, tasksRes, completionsRes, allPtsRes, rewardsRes, redemptionsRes, monthlyRes, shoppingRes] = await Promise.all([
       supabase.from('household_members').select('*').eq('household_id', householdId),
       supabase.from('tasks').select('*').eq('household_id', householdId).order('created_at'),
       supabase.from('completions').select('*')
@@ -183,6 +200,7 @@ export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       supabase.from('rewards').select('*').eq('household_id', householdId).order('created_at'),
       supabase.from('redemptions').select('*').eq('household_id', householdId).order('redeemed_at', { ascending: false }),
       supabase.from('monthly_scores').select('*').eq('household_id', householdId).order('year_month', { ascending: false }),
+      supabase.from('shopping_items').select('*').eq('household_id', householdId).order('added_at', { ascending: false }),
     ]);
 
     if (membersRes.data) setMembers(membersRes.data as HouseholdMember[]);
@@ -200,6 +218,26 @@ export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     if (rewardsRes.data) setRewards(rewardsRes.data as Reward[]);
     if (redemptionsRes.data) setRedemptions(redemptionsRes.data as Redemption[]);
     if (monthlyRes.data) setMonthlyScores(monthlyRes.data as MonthlyScore[]);
+    if (shoppingRes.data) setShoppingItems(shoppingRes.data as ShoppingItem[]);
+  }, [householdId]);
+
+  // Upload a proof photo to the public "task-proofs" bucket and return the
+  // resulting public URL (or null on error). Caller stores the URL on the
+  // completion row.
+  const uploadProofPhoto = useCallback(async (file: File): Promise<string | null> => {
+    if (!householdId) return null;
+    const ext = file.name.split('.').pop()?.toLowerCase() || 'jpg';
+    const path = `${householdId}/${crypto.randomUUID()}.${ext}`;
+    const { error } = await supabase.storage.from('task-proofs').upload(path, file, {
+      upsert: false,
+      contentType: file.type || 'image/jpeg',
+    });
+    if (error) {
+      console.error('uploadProofPhoto failed', error);
+      return null;
+    }
+    const { data } = supabase.storage.from('task-proofs').getPublicUrl(path);
+    return data.publicUrl ?? null;
   }, [householdId]);
 
   const seedTasks = useCallback(async (hId: string) => {
@@ -314,6 +352,7 @@ export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       .on('postgres_changes', { event: '*', schema: 'public', table: 'rewards', filter: `household_id=eq.${householdId}` }, () => refreshData())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'redemptions', filter: `household_id=eq.${householdId}` }, () => refreshData())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'monthly_scores', filter: `household_id=eq.${householdId}` }, () => refreshData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'shopping_items', filter: `household_id=eq.${householdId}` }, () => refreshData())
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
@@ -353,10 +392,10 @@ export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   return (
     <HouseholdContext.Provider value={{
       householdId, currentMember, members, tasks, completions,
-      allTimePoints, rewards, redemptions, monthlyScores,
+      allTimePoints, rewards, redemptions, monthlyScores, shoppingItems,
       monthEarned, monthSpent, availablePoints,
       setCurrentMember, setHouseholdId, logout, refreshData,
-      resetTasksToDefaults,
+      resetTasksToDefaults, uploadProofPhoto,
     }}>
       {children}
     </HouseholdContext.Provider>

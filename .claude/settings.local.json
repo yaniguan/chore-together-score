@@ -9,7 +9,15 @@
       "Bash(npm uninstall:*)",
       "Bash(cat:*)",
       "Bash(supabase:*)",
-      "Bash(npx vercel:*)"
+      "Bash(npx vercel:*)",
+      "Bash(wait %1)",
+      "Bash(kill 13163 14689)",
+      "Bash(awk '$3 > 1.0 || /node|tsc|vite/')",
+      "Bash(echo \"---EXIT: $?---\")",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(echo \"EXIT=$?\")"
     ]
   }
 }

@@ -1,13 +1,16 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { useHousehold, Task } from '@/context/HouseholdContext';
 import { supabase } from '@/integrations/supabase/client';
 import { motion } from 'framer-motion';
 import confetti from 'canvas-confetti';
-import { Check, Star, Minus } from 'lucide-react';
+import { Check, Star, Minus, Camera, Image as ImageIcon } from 'lucide-react';
 import { getTaskCompletionsForDate } from '@/lib/completions';
 
 const TaskCard: React.FC<{ task: Task; onComplete?: () => void; compact?: boolean }> = ({ task, onComplete, compact }) => {
-  const { currentMember, completions, householdId, members } = useHousehold();
+  const { currentMember, completions, householdId, members, uploadProofPhoto } = useHousehold();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   const todayMyCompletions = useMemo(() =>
     getTaskCompletionsForDate(completions, task.id, new Date(), currentMember?.id),
@@ -60,6 +63,43 @@ const TaskCard: React.FC<{ task: Task; onComplete?: () => void; compact?: boolea
     onComplete?.();
   };
 
+  const handlePhotoSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !canComplete || !currentMember || !householdId) return;
+    setUploading(true);
+    try {
+      const url = await uploadProofPhoto(file);
+      if (!url) {
+        setUploading(false);
+        return;
+      }
+      confetti({
+        particleCount: 30,
+        spread: 60,
+        origin: { y: 0.7 },
+        colors: [currentMember.avatar_color, '#FFD700', '#FFA500'],
+      });
+      await supabase.from('completions').insert({
+        task_id: task.id,
+        household_id: householdId,
+        member_id: currentMember.id,
+        points_earned: task.points,
+        photo_url: url,
+      });
+      onComplete?.();
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  // Most recent photo by anyone today (used for the camera/photo button state).
+  const latestTodayPhoto = useMemo(() => {
+    const withPhoto = todayAllCompletions.filter(c => c.photo_url);
+    if (withPhoto.length === 0) return null;
+    return withPhoto.reduce((a, b) => (a.completed_at > b.completed_at ? a : b)).photo_url;
+  }, [todayAllCompletions]);
+
   if (compact) {
     return (
       <motion.div
@@ -88,6 +128,14 @@ const TaskCard: React.FC<{ task: Task; onComplete?: () => void; compact?: boolea
             })}
           </div>
         )}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          className="hidden"
+          onChange={handlePhotoSelected}
+        />
         <div className="flex gap-1 mt-auto pt-1">
           {canUndo && (
             <motion.button
@@ -99,6 +147,25 @@ const TaskCard: React.FC<{ task: Task; onComplete?: () => void; compact?: boolea
               <Minus className="w-3 h-3" />
             </motion.button>
           )}
+          {latestTodayPhoto && (
+            <motion.button
+              whileTap={{ scale: 0.85 }}
+              onClick={() => setPreviewUrl(latestTodayPhoto)}
+              className="w-7 h-8 rounded-lg flex items-center justify-center text-primary hover:bg-primary/10 transition-colors flex-shrink-0"
+              title="查看照片"
+            >
+              <ImageIcon className="w-3 h-3" />
+            </motion.button>
+          )}
+          <motion.button
+            whileTap={{ scale: 0.85 }}
+            onClick={() => fileInputRef.current?.click()}
+            disabled={!canComplete || uploading}
+            className="w-7 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-muted transition-colors flex-shrink-0 disabled:opacity-40"
+            title="拍照打卡"
+          >
+            <Camera className="w-3 h-3" />
+          </motion.button>
           <motion.button
             whileTap={{ scale: 0.85 }}
             onClick={handleComplete}
@@ -112,6 +179,7 @@ const TaskCard: React.FC<{ task: Task; onComplete?: () => void; compact?: boolea
             <Check className="w-4 h-4" />
           </motion.button>
         </div>
+        {previewUrl && <PhotoLightbox url={previewUrl} onClose={() => setPreviewUrl(null)} />}
       </motion.div>
     );
   }
@@ -151,6 +219,37 @@ const TaskCard: React.FC<{ task: Task; onComplete?: () => void; compact?: boolea
           )}
         </div>
 
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          className="hidden"
+          onChange={handlePhotoSelected}
+        />
+
+        {/* Photo button (camera or thumbnail) */}
+        {latestTodayPhoto ? (
+          <motion.button
+            whileTap={{ scale: 0.9 }}
+            onClick={() => setPreviewUrl(latestTodayPhoto)}
+            className="w-10 h-10 rounded-xl overflow-hidden border-2 border-primary/30 flex-shrink-0 hover:border-primary transition-colors"
+            title="查看照片"
+          >
+            <img src={latestTodayPhoto} alt="proof" className="w-full h-full object-cover" />
+          </motion.button>
+        ) : (
+          <motion.button
+            whileTap={{ scale: 0.85 }}
+            onClick={() => fileInputRef.current?.click()}
+            disabled={!canComplete || uploading}
+            className="w-10 h-10 rounded-xl flex items-center justify-center text-muted-foreground hover:bg-muted transition-colors flex-shrink-0 disabled:opacity-40"
+            title="拍照打卡"
+          >
+            <Camera className="w-4 h-4" />
+          </motion.button>
+        )}
+
         {/* Undo button */}
         {canUndo && (
           <motion.button
@@ -177,8 +276,35 @@ const TaskCard: React.FC<{ task: Task; onComplete?: () => void; compact?: boolea
           {canComplete ? <Check className="w-6 h-6" /> : '✓'}
         </motion.button>
       </div>
+      {previewUrl && <PhotoLightbox url={previewUrl} onClose={() => setPreviewUrl(null)} />}
     </motion.div>
   );
 };
+
+export const PhotoLightbox: React.FC<{ url: string; onClose: () => void }> = ({ url, onClose }) => (
+  <motion.div
+    initial={{ opacity: 0 }}
+    animate={{ opacity: 1 }}
+    exit={{ opacity: 0 }}
+    className="fixed inset-0 z-[60] bg-black/90 backdrop-blur flex items-center justify-center p-4"
+    onClick={onClose}
+  >
+    <motion.img
+      initial={{ scale: 0.9 }}
+      animate={{ scale: 1 }}
+      src={url}
+      alt="proof"
+      className="max-w-full max-h-full rounded-2xl object-contain"
+      onClick={e => e.stopPropagation()}
+    />
+    <button
+      onClick={onClose}
+      className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/20 text-white flex items-center justify-center"
+      aria-label="关闭"
+    >
+      ✕
+    </button>
+  </motion.div>
+);
 
 export default TaskCard;

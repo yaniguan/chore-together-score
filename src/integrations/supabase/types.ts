@@ -22,6 +22,7 @@ export type Database = {
           member_id: string
           points_earned: number
           task_id: string
+          photo_url: string | null
         }
         Insert: {
           completed_at?: string
@@ -30,6 +31,7 @@ export type Database = {
           member_id: string
           points_earned: number
           task_id: string
+          photo_url?: string | null
         }
         Update: {
           completed_at?: string
@@ -38,6 +40,7 @@ export type Database = {
           member_id?: string
           points_earned?: number
           task_id?: string
+          photo_url?: string | null
         }
         Relationships: [
           {
@@ -210,6 +213,50 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "rewards_household_id_fkey"
+            columns: ["household_id"]
+            isOneToOne: false
+            referencedRelation: "households"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      shopping_items: {
+        Row: {
+          id: string
+          household_id: string
+          name: string
+          quantity: string | null
+          notes: string | null
+          added_by: string | null
+          added_at: string
+          completed_at: string | null
+          completed_by: string | null
+        }
+        Insert: {
+          id?: string
+          household_id: string
+          name: string
+          quantity?: string | null
+          notes?: string | null
+          added_by?: string | null
+          added_at?: string
+          completed_at?: string | null
+          completed_by?: string | null
+        }
+        Update: {
+          id?: string
+          household_id?: string
+          name?: string
+          quantity?: string | null
+          notes?: string | null
+          added_by?: string | null
+          added_at?: string
+          completed_at?: string | null
+          completed_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shopping_items_household_id_fkey"
             columns: ["household_id"]
             isOneToOne: false
             referencedRelation: "households"

@@ -8,6 +8,7 @@ import {
 import { motion } from 'framer-motion';
 import { Trophy, Flame, TrendingUp, Target } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
+import MonthlyRecapCard from '@/components/MonthlyRecapCard';
 
 type PointsChartDatum = {
   label: string;
@@ -263,6 +264,9 @@ const DashboardPage: React.FC = () => {
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-extrabold text-foreground">Dashboard</h1>
+
+      {/* Monthly recap (winner, top tasks, totals) */}
+      <MonthlyRecapCard />
 
       {/* ── A. Summary Scorecards ── */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="grid grid-cols-2 gap-3">

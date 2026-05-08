@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { useHousehold, Completion } from '@/context/HouseholdContext';
-import TaskCard from '@/components/TaskCard';
+import TaskCard, { PhotoLightbox } from '@/components/TaskCard';
 import { Calendar } from '@/components/ui/calendar';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
@@ -20,6 +20,7 @@ const TodayPage: React.FC = () => {
   const [otherDateCompletions, setOtherDateCompletions] = useState<Completion[]>([]);
   const [loadingOther, setLoadingOther] = useState(false);
   const [loggingTask, setLoggingTask] = useState<Record<string, boolean>>({});
+  const [previewPhoto, setPreviewPhoto] = useState<string | null>(null);
 
   const isToday = selectedDate.toDateString() === new Date().toDateString();
   const isEditable = useMemo(() => isDateEditable(selectedDate), [selectedDate]);
@@ -372,6 +373,9 @@ const TodayPage: React.FC = () => {
                   ))
                 : group.tasks.map((task, i) => {
                     const taskStats = otherDateStatsByTask[task.id] ?? {};
+                    const taskPhotos = otherDateCompletions
+                      .filter(c => c.task_id === task.id && c.photo_url)
+                      .map(c => c.photo_url as string);
                     return (
                       <motion.div
                         key={task.id}
@@ -402,6 +406,20 @@ const TodayPage: React.FC = () => {
                                 );
                               })}
                             </div>
+                            {taskPhotos.length > 0 && (
+                              <div className="flex gap-1.5 mt-2 flex-wrap">
+                                {taskPhotos.map((u, idx) => (
+                                  <button
+                                    key={idx}
+                                    onClick={() => setPreviewPhoto(u)}
+                                    className="w-12 h-12 rounded-lg overflow-hidden border-2 border-primary/30 hover:border-primary transition-colors"
+                                    title="查看照片"
+                                  >
+                                    <img src={u} alt="proof" className="w-full h-full object-cover" />
+                                  </button>
+                                ))}
+                              </div>
+                            )}
                             {/* Quick log + undo buttons — only available for editable dates */}
                             {isEditable && (
                               <div className="flex flex-wrap gap-2 mt-3">
@@ -449,6 +467,8 @@ const TodayPage: React.FC = () => {
           </motion.div>
         ))}
       </div>
+
+      {previewPhoto && <PhotoLightbox url={previewPhoto} onClose={() => setPreviewPhoto(null)} />}
     </div>
   );
 };
