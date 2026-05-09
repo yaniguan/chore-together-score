@@ -233,7 +233,8 @@ export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       contentType: file.type || 'image/jpeg',
     });
     if (error) {
-      console.error('uploadProofPhoto failed', error);
+      // Surface to console with full detail; caller shows a user-facing toast.
+      console.error('uploadProofPhoto failed', error.message, error);
       return null;
     }
     const { data } = supabase.storage.from('task-proofs').getPublicUrl(path);

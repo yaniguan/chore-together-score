@@ -1,5 +1,6 @@
 -- Shared shopping list (any household member can add / check off / delete).
-CREATE TABLE public.shopping_items (
+-- Idempotent: re-running this whole file will not error.
+CREATE TABLE IF NOT EXISTS public.shopping_items (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   household_id UUID NOT NULL REFERENCES public.households(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
@@ -12,21 +13,26 @@ CREATE TABLE public.shopping_items (
 );
 
 ALTER TABLE public.shopping_items ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow all shopping_items" ON public.shopping_items;
 CREATE POLICY "Allow all shopping_items" ON public.shopping_items FOR ALL USING (true) WITH CHECK (true);
-ALTER PUBLICATION supabase_realtime ADD TABLE public.shopping_items;
 
-CREATE INDEX idx_shopping_items_household ON public.shopping_items(household_id);
-CREATE INDEX idx_shopping_items_added_at ON public.shopping_items(household_id, added_at);
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE public.shopping_items;
+EXCEPTION WHEN duplicate_object THEN
+  NULL;
+END $$;
 
--- Photo proof: optional URL stored on each completion row. Lives in the
--- "task-proofs" Storage bucket created below.
-ALTER TABLE public.completions ADD COLUMN photo_url TEXT;
+CREATE INDEX IF NOT EXISTS idx_shopping_items_household ON public.shopping_items(household_id);
+CREATE INDEX IF NOT EXISTS idx_shopping_items_added_at ON public.shopping_items(household_id, added_at);
 
--- Public Storage bucket for completion photos. The 2-person trust model
--- mirrors the rest of the app's permissive policies.
+-- Photo proof: optional URL stored on each completion row.
+ALTER TABLE public.completions ADD COLUMN IF NOT EXISTS photo_url TEXT;
+
+-- Public Storage bucket for completion photos.
 INSERT INTO storage.buckets (id, name, public)
 VALUES ('task-proofs', 'task-proofs', true)
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (id) DO UPDATE SET public = EXCLUDED.public;
 
 DROP POLICY IF EXISTS "task-proofs read" ON storage.objects;
 DROP POLICY IF EXISTS "task-proofs write" ON storage.objects;

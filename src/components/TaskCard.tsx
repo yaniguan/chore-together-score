@@ -5,6 +5,7 @@ import { motion } from 'framer-motion';
 import confetti from 'canvas-confetti';
 import { Check, Star, Minus, Camera, Image as ImageIcon } from 'lucide-react';
 import { getTaskCompletionsForDate } from '@/lib/completions';
+import { toast } from 'sonner';
 
 const TaskCard: React.FC<{ task: Task; onComplete?: () => void; compact?: boolean }> = ({ task, onComplete, compact }) => {
   const { currentMember, completions, householdId, members, uploadProofPhoto } = useHousehold();
@@ -71,7 +72,22 @@ const TaskCard: React.FC<{ task: Task; onComplete?: () => void; compact?: boolea
     try {
       const url = await uploadProofPhoto(file);
       if (!url) {
-        setUploading(false);
+        toast.error('照片上传失败：检查 Supabase 是否已建好 task-proofs 桶（见迁移 SQL）', { duration: 6000 });
+        return;
+      }
+      const { error } = await supabase.from('completions').insert({
+        task_id: task.id,
+        household_id: householdId,
+        member_id: currentMember.id,
+        points_earned: task.points,
+        photo_url: url,
+      });
+      if (error) {
+        if (error.message?.includes('photo_url')) {
+          toast.error('completions 表还没加 photo_url 列，请先跑迁移 SQL', { duration: 6000 });
+        } else {
+          toast.error(`记录失败: ${error.message}`);
+        }
         return;
       }
       confetti({
@@ -79,13 +95,6 @@ const TaskCard: React.FC<{ task: Task; onComplete?: () => void; compact?: boolea
         spread: 60,
         origin: { y: 0.7 },
         colors: [currentMember.avatar_color, '#FFD700', '#FFA500'],
-      });
-      await supabase.from('completions').insert({
-        task_id: task.id,
-        household_id: householdId,
-        member_id: currentMember.id,
-        points_earned: task.points,
-        photo_url: url,
       });
       onComplete?.();
     } finally {

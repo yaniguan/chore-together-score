@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, ShoppingCart, Trash2, Check, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { toast } from 'sonner';
 
 const ShoppingPage: React.FC = () => {
   const { householdId, currentMember, members, shoppingItems, refreshData } = useHousehold();
@@ -20,17 +21,29 @@ const ShoppingPage: React.FC = () => {
     return { active: a, done: d };
   }, [shoppingItems]);
 
+  const reportError = (action: string, message: string | undefined) => {
+    if (message?.includes('shopping_items') || message?.includes('relation')) {
+      toast.error('购物清单表还没建好，请先在 Supabase 后台跑迁移 SQL', { duration: 6000 });
+    } else {
+      toast.error(`${action}失败: ${message ?? '未知错误'}`);
+    }
+  };
+
   const handleAdd = async () => {
     const n = name.trim();
     if (!n || !householdId) return;
     setSubmitting(true);
     try {
-      await supabase.from('shopping_items').insert({
+      const { error } = await supabase.from('shopping_items').insert({
         household_id: householdId,
         name: n,
         quantity: quantity.trim() || null,
         added_by: currentMember?.id ?? null,
       });
+      if (error) {
+        reportError('添加', error.message);
+        return;
+      }
       setName('');
       setQuantity('');
       await refreshData();
@@ -41,15 +54,23 @@ const ShoppingPage: React.FC = () => {
 
   const handleToggle = async (id: string, isDone: boolean) => {
     if (!householdId) return;
-    await supabase.from('shopping_items').update({
+    const { error } = await supabase.from('shopping_items').update({
       completed_at: isDone ? null : new Date().toISOString(),
       completed_by: isDone ? null : (currentMember?.id ?? null),
     }).eq('id', id);
+    if (error) {
+      reportError('更新', error.message);
+      return;
+    }
     await refreshData();
   };
 
   const handleDelete = async (id: string) => {
-    await supabase.from('shopping_items').delete().eq('id', id);
+    const { error } = await supabase.from('shopping_items').delete().eq('id', id);
+    if (error) {
+      reportError('删除', error.message);
+      return;
+    }
     await refreshData();
   };
 
