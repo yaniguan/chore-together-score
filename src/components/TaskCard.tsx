@@ -6,9 +6,10 @@ import confetti from 'canvas-confetti';
 import { Check, Star, Minus, Camera, Image as ImageIcon } from 'lucide-react';
 import { getTaskCompletionsForDate } from '@/lib/completions';
 import { toast } from 'sonner';
+import { haptic, playClick } from '@/lib/feedback';
 
 const TaskCard: React.FC<{ task: Task; onComplete?: () => void; compact?: boolean }> = ({ task, onComplete, compact }) => {
-  const { currentMember, completions, householdId, members, uploadProofPhoto } = useHousehold();
+  const { currentMember, completions, householdId, members, uploadProofPhoto, mutateCompletions } = useHousehold();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -38,6 +39,8 @@ const TaskCard: React.FC<{ task: Task; onComplete?: () => void; compact?: boolea
   const handleComplete = async () => {
     if (!canComplete || !currentMember || !householdId) return;
 
+    haptic();
+    playClick();
     confetti({
       particleCount: 30,
       spread: 60,
@@ -45,13 +48,31 @@ const TaskCard: React.FC<{ task: Task; onComplete?: () => void; compact?: boolea
       colors: [currentMember.avatar_color, '#FFD700', '#FFA500'],
     });
 
-    await supabase.from('completions').insert({
+    // Optimistic insert: temp id, instantly visible. Realtime will replace
+    // with the real row; on error we splice it back out.
+    const tempId = `temp-${crypto.randomUUID()}`;
+    const optimistic = {
+      id: tempId,
+      task_id: task.id,
+      household_id: householdId,
+      member_id: currentMember.id,
+      points_earned: task.points,
+      completed_at: new Date().toISOString(),
+      photo_url: null,
+    };
+    mutateCompletions(prev => [optimistic, ...prev]);
+
+    const { error } = await supabase.from('completions').insert({
       task_id: task.id,
       household_id: householdId,
       member_id: currentMember.id,
       points_earned: task.points,
     });
-
+    if (error) {
+      mutateCompletions(prev => prev.filter(c => c.id !== tempId));
+      toast.error(`完成失败: ${error.message}`);
+      return;
+    }
     onComplete?.();
   };
 
@@ -60,7 +81,14 @@ const TaskCard: React.FC<{ task: Task; onComplete?: () => void; compact?: boolea
     const latest = todayMyCompletions.reduce((a, b) =>
       a.completed_at > b.completed_at ? a : b
     );
-    await supabase.from('completions').delete().eq('id', latest.id);
+    // Optimistic delete
+    mutateCompletions(prev => prev.filter(c => c.id !== latest.id));
+    const { error } = await supabase.from('completions').delete().eq('id', latest.id);
+    if (error) {
+      mutateCompletions(prev => [latest, ...prev]);
+      toast.error(`撤销失败: ${error.message}`);
+      return;
+    }
     onComplete?.();
   };
 
@@ -75,6 +103,19 @@ const TaskCard: React.FC<{ task: Task; onComplete?: () => void; compact?: boolea
         toast.error('照片上传失败：检查 Supabase 是否已建好 task-proofs 桶（见迁移 SQL）', { duration: 6000 });
         return;
       }
+      // Optimistic insert with the just-uploaded photo URL
+      const tempId = `temp-${crypto.randomUUID()}`;
+      const optimistic = {
+        id: tempId,
+        task_id: task.id,
+        household_id: householdId,
+        member_id: currentMember.id,
+        points_earned: task.points,
+        completed_at: new Date().toISOString(),
+        photo_url: url,
+      };
+      mutateCompletions(prev => [optimistic, ...prev]);
+
       const { error } = await supabase.from('completions').insert({
         task_id: task.id,
         household_id: householdId,
@@ -83,6 +124,7 @@ const TaskCard: React.FC<{ task: Task; onComplete?: () => void; compact?: boolea
         photo_url: url,
       });
       if (error) {
+        mutateCompletions(prev => prev.filter(c => c.id !== tempId));
         if (error.message?.includes('photo_url')) {
           toast.error('completions 表还没加 photo_url 列，请先跑迁移 SQL', { duration: 6000 });
         } else {
@@ -90,6 +132,8 @@ const TaskCard: React.FC<{ task: Task; onComplete?: () => void; compact?: boolea
         }
         return;
       }
+      haptic();
+      playClick();
       confetti({
         particleCount: 30,
         spread: 60,

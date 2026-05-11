@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
 
 const ShoppingPage: React.FC = () => {
-  const { householdId, currentMember, members, shoppingItems, refreshData } = useHousehold();
+  const { householdId, currentMember, members, shoppingItems, refreshData, mutateShoppingItems } = useHousehold();
   const [name, setName] = useState('');
   const [quantity, setQuantity] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -33,6 +33,25 @@ const ShoppingPage: React.FC = () => {
     const n = name.trim();
     if (!n || !householdId) return;
     setSubmitting(true);
+    // Optimistic: drop it into the list immediately under a temp id; realtime
+    // / refreshData will replace it with the real row from the server.
+    const tempId = `temp-${crypto.randomUUID()}`;
+    const optimistic = {
+      id: tempId,
+      household_id: householdId,
+      name: n,
+      quantity: quantity.trim() || null,
+      notes: null,
+      added_by: currentMember?.id ?? null,
+      added_at: new Date().toISOString(),
+      completed_at: null,
+      completed_by: null,
+    };
+    mutateShoppingItems(prev => [optimistic, ...prev]);
+    const submittedName = name;
+    const submittedQty = quantity;
+    setName('');
+    setQuantity('');
     try {
       const { error } = await supabase.from('shopping_items').insert({
         household_id: householdId,
@@ -41,12 +60,14 @@ const ShoppingPage: React.FC = () => {
         added_by: currentMember?.id ?? null,
       });
       if (error) {
+        mutateShoppingItems(prev => prev.filter(i => i.id !== tempId));
+        setName(submittedName);
+        setQuantity(submittedQty);
         reportError('添加', error.message);
         return;
       }
-      setName('');
-      setQuantity('');
-      await refreshData();
+      // Don't await refreshData — realtime will catch up and tempId will be
+      // replaced by the real row.
     } finally {
       setSubmitting(false);
     }
@@ -54,24 +75,32 @@ const ShoppingPage: React.FC = () => {
 
   const handleToggle = async (id: string, isDone: boolean) => {
     if (!householdId) return;
+    // Optimistic flip
+    const prevItem = shoppingItems.find(i => i.id === id);
+    mutateShoppingItems(prev => prev.map(i => i.id === id ? {
+      ...i,
+      completed_at: isDone ? null : new Date().toISOString(),
+      completed_by: isDone ? null : (currentMember?.id ?? null),
+    } : i));
     const { error } = await supabase.from('shopping_items').update({
       completed_at: isDone ? null : new Date().toISOString(),
       completed_by: isDone ? null : (currentMember?.id ?? null),
     }).eq('id', id);
     if (error) {
+      // Roll back
+      if (prevItem) mutateShoppingItems(prev => prev.map(i => i.id === id ? prevItem : i));
       reportError('更新', error.message);
-      return;
     }
-    await refreshData();
   };
 
   const handleDelete = async (id: string) => {
+    const removed = shoppingItems.find(i => i.id === id);
+    mutateShoppingItems(prev => prev.filter(i => i.id !== id));
     const { error } = await supabase.from('shopping_items').delete().eq('id', id);
     if (error) {
+      if (removed) mutateShoppingItems(prev => [removed, ...prev]);
       reportError('删除', error.message);
-      return;
     }
-    await refreshData();
   };
 
   const findMember = (id: string | null) => members.find(m => m.id === id);

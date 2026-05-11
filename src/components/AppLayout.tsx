@@ -1,7 +1,7 @@
 import React from 'react';
 import { useHousehold } from '@/context/HouseholdContext';
 import { NavLink, useLocation } from 'react-router-dom';
-import { Home, BarChart3, ListTodo, Settings, LogOut, Gift, ShoppingCart } from 'lucide-react';
+import { Home, BarChart3, ListTodo, Settings, Gift, ShoppingCart } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 const navItems = [
@@ -10,13 +10,11 @@ const navItems = [
   { path: '/tasks', icon: ListTodo, label: 'Tasks' },
   { path: '/shopping', icon: ShoppingCart, label: 'Shop' },
   { path: '/rewards', icon: Gift, label: 'Rewards' },
-  { path: '/settings', icon: Settings, label: 'Settings' },
 ];
 
 const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { currentMember, members, logout } = useHousehold();
+  const { currentMember, members } = useHousehold();
   const location = useLocation();
-  const otherMember = members.find(m => m.id !== currentMember?.id);
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -40,6 +38,17 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
                 {m.display_name.charAt(0).toUpperCase()}
               </div>
             ))}
+            <NavLink
+              to="/settings"
+              className={({ isActive }) =>
+                `ml-1 w-8 h-8 rounded-xl flex items-center justify-center transition-colors ${
+                  isActive ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'
+                }`
+              }
+              title="Settings"
+            >
+              <Settings className="w-4 h-4" />
+            </NavLink>
           </div>
         </div>
       </header>

@@ -98,6 +98,11 @@ interface HouseholdContextType {
   refreshData: () => Promise<void>;
   resetTasksToDefaults: () => Promise<void>;
   uploadProofPhoto: (file: File) => Promise<string | null>;
+  // Optimistic mutators — pages call these to update local state before the
+  // server round-trip; on failure they call again to roll back. Realtime /
+  // refreshData reconciles the truth afterwards.
+  mutateCompletions: (fn: (prev: Completion[]) => Completion[]) => void;
+  mutateShoppingItems: (fn: (prev: ShoppingItem[]) => ShoppingItem[]) => void;
 }
 
 const HouseholdContext = createContext<HouseholdContextType | null>(null);
@@ -397,6 +402,8 @@ export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       monthEarned, monthSpent, availablePoints,
       setCurrentMember, setHouseholdId, logout, refreshData,
       resetTasksToDefaults, uploadProofPhoto,
+      mutateCompletions: setCompletions,
+      mutateShoppingItems: setShoppingItems,
     }}>
       {children}
     </HouseholdContext.Provider>

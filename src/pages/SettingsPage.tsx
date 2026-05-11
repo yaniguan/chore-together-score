@@ -1,17 +1,24 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useHousehold } from '@/context/HouseholdContext';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
-import { LogOut, Users, Home, Sun, Bell } from 'lucide-react';
+import { LogOut, Users, Home, Sun, Bell, Smartphone } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useTheme } from 'next-themes';
 import { useNotifications } from '@/hooks/useNotifications';
+import {
+  getHapticEnabled, getSoundEnabled,
+  setHapticEnabled, setSoundEnabled,
+  haptic, playClick,
+} from '@/lib/feedback';
 
 const SettingsPage: React.FC = () => {
   const { currentMember, members, householdId, logout } = useHousehold();
   const { theme, setTheme } = useTheme();
   const isDark = theme === 'dark';
   const { enabled: notificationsEnabled, toggle: toggleNotifications } = useNotifications();
+  const [hapticOn, setHapticOn] = useState(() => getHapticEnabled());
+  const [soundOn, setSoundOn] = useState(() => getSoundEnabled());
 
   return (
     <div className="space-y-6">
@@ -31,6 +38,42 @@ const SettingsPage: React.FC = () => {
           <Switch
             checked={isDark}
             onCheckedChange={checked => setTheme(checked ? 'dark' : 'light')}
+          />
+        </div>
+      </motion.div>
+
+      {/* Feedback */}
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.04 }} className="bg-card rounded-2xl border p-5 space-y-4">
+        <div className="flex items-center gap-2">
+          <Smartphone className="w-5 h-5 text-primary" />
+          <h2 className="font-bold">Feedback</h2>
+        </div>
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-semibold text-foreground">Vibration</p>
+            <p className="text-xs text-muted-foreground">Short buzz when you complete a task</p>
+          </div>
+          <Switch
+            checked={hapticOn}
+            onCheckedChange={v => {
+              setHapticEnabled(v);
+              setHapticOn(v);
+              if (v) haptic();
+            }}
+          />
+        </div>
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-semibold text-foreground">Click Sound</p>
+            <p className="text-xs text-muted-foreground">Tap-tone on completion</p>
+          </div>
+          <Switch
+            checked={soundOn}
+            onCheckedChange={v => {
+              setSoundEnabled(v);
+              setSoundOn(v);
+              if (v) playClick();
+            }}
           />
         </div>
       </motion.div>
