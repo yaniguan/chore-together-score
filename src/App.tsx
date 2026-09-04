@@ -1,4 +1,3 @@
-import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -6,7 +5,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { HouseholdProvider, useHousehold } from "@/context/HouseholdContext";
 import SetupPage from "./pages/SetupPage";
 import TodayPage from "./pages/TodayPage";
-import DashboardPage from "./pages/DashboardPage";
+import MonthPage from "./pages/MonthPage";
 import TasksPage from "./pages/TasksPage";
 import SettingsPage from "./pages/SettingsPage";
 import RewardsPage from "./pages/RewardsPage";
@@ -27,11 +26,12 @@ const AppRoutes = () => {
     <AppLayout>
       <Routes>
         <Route path="/" element={<TodayPage />} />
-        <Route path="/dashboard" element={<DashboardPage />} />
-        <Route path="/tasks" element={<TasksPage />} />
-        <Route path="/rewards" element={<RewardsPage />} />
+        <Route path="/month" element={<MonthPage />} />
         <Route path="/shopping" element={<ShoppingPage />} />
+        <Route path="/rewards" element={<RewardsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
+        {/* Task management lives under Settings — it's setup, not a daily destination. */}
+        <Route path="/settings/tasks" element={<TasksPage />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
     </AppLayout>
@@ -41,7 +41,6 @@ const AppRoutes = () => {
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
-      <Toaster />
       <Sonner />
       <BrowserRouter>
         <HouseholdProvider>

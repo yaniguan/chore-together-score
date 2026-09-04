@@ -1,472 +1,341 @@
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { useHousehold, Completion } from '@/context/HouseholdContext';
-import TaskCard, { PhotoLightbox } from '@/components/TaskCard';
-import { Calendar } from '@/components/ui/calendar';
-import { Progress } from '@/components/ui/progress';
-import { Badge } from '@/components/ui/badge';
-import { motion } from 'framer-motion';
+import TaskRow from '@/components/TaskRow';
+import PhotoLightbox from '@/components/PhotoLightbox';
+import MonthDuelCard from '@/components/MonthDuelCard';
 import { supabase } from '@/integrations/supabase/client';
-import { Star, Plus, Minus } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { CATEGORIES, normalizeCategory } from '@/lib/constants';
-import { getDayBounds, getTaskCompletionsForDate, calculateStreak } from '@/lib/completions';
-import { isDateEditable } from '@/lib/monthCycle';
+import { Flame } from 'lucide-react';
+import { CATEGORIES, FREQUENCIES, normalizeCategory, normalizeFrequency, FrequencyValue } from '@/lib/constants';
+import { TaskIcon } from '@/lib/taskIcons';
+import { getDayBounds, calculateStreak } from '@/lib/completions';
 import { useNotifications } from '@/hooks/useNotifications';
 import { useDailyReminder } from '@/hooks/useDailyReminder';
 
+type Filter = FrequencyValue | 'all';
+
+const FILTERS: { value: Filter; label: string }[] = [
+  ...FREQUENCIES.map(f => ({ value: f.value as Filter, label: f.label })),
+  { value: 'all', label: '全部' },
+];
+
 const TodayPage: React.FC = () => {
-  const { tasks, completions, currentMember, members, refreshData, householdId } = useHousehold();
-  const [selectedDate, setSelectedDate] = useState<Date>(() => new Date());
-  const [otherDateCompletions, setOtherDateCompletions] = useState<Completion[]>([]);
-  const [loadingOther, setLoadingOther] = useState(false);
-  const [loggingTask, setLoggingTask] = useState<Record<string, boolean>>({});
+  const { tasks, completions, currentMember, members, householdId, loadError } = useHousehold();
+  const [filter, setFilter] = useState<Filter>('daily');
+  const [selectedOffset, setSelectedOffset] = useState(0); // 0 = today, 1 = yesterday …
+  const [pastCompletions, setPastCompletions] = useState<Completion[]>([]);
+  const [loadingPast, setLoadingPast] = useState(false);
   const [previewPhoto, setPreviewPhoto] = useState<string | null>(null);
 
-  const isToday = selectedDate.toDateString() === new Date().toDateString();
-  const isEditable = useMemo(() => isDateEditable(selectedDate), [selectedDate]);
+  const isToday = selectedOffset === 0;
 
-  const greeting = () => {
-    const hour = new Date().getHours();
-    if (hour < 12) return 'Good morning';
-    if (hour < 18) return 'Good afternoon';
-    return 'Good evening';
-  };
+  const selectedDate = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - selectedOffset);
+    return d;
+  }, [selectedOffset]);
 
-  const daysWithCompletions = useMemo(() => {
-    const s = new Set<string>();
+  // ── Last 7 days strip ────────────────────────────────────────────────────
+  const dayStrip = useMemo(() => {
+    const byDay = new Map<string, Set<string>>();
     for (const c of completions) {
       const d = new Date(c.completed_at);
-      s.add(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`);
+      const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+      if (!byDay.has(key)) byDay.set(key, new Set());
+      byDay.get(key)!.add(c.member_id);
     }
-    return s;
+    return Array.from({ length: 7 }, (_, i) => {
+      const offset = 6 - i;
+      const d = new Date();
+      d.setDate(d.getDate() - offset);
+      const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+      return {
+        offset,
+        date: d,
+        weekday: ['日', '一', '二', '三', '四', '五', '六'][d.getDay()],
+        dayOfMonth: d.getDate(),
+        actors: byDay.get(key) ?? new Set<string>(),
+      };
+    });
   }, [completions]);
 
-  const selectedDayBounds = useMemo(() => getDayBounds(selectedDate), [selectedDate]);
-
-  const dayPoints = useMemo(() => {
-    let src;
-    if (isToday) {
-      const todayStart = getDayBounds(new Date()).start;
-      src = completions.filter(c => new Date(c.completed_at) >= todayStart);
-    } else {
-      src = otherDateCompletions;
-    }
-    return members.map(m => ({
-      ...m,
-      pts: src
-        .filter(c => c.member_id === m.id)
-        .reduce((s, c) => s + c.points_earned, 0),
-    }));
-  }, [isToday, completions, otherDateCompletions, members]);
-
-  // Memoized grouped tasks (same pattern as TasksPage)
-  const groupedTasks = useMemo(() =>
-    CATEGORIES
-      .map(cat => ({ ...cat, tasks: tasks.filter(t => normalizeCategory(t.category) === cat.value) }))
-      .filter(g => g.tasks.length > 0),
-    [tasks]
-  );
-
-  // Pre-compute per-member stats for each task on a past date (single pass per task)
-  const otherDateStatsByTask = useMemo(() => {
-    const map: Record<string, Record<string, { count: number; pts: number }>> = {};
-    for (const c of otherDateCompletions) {
-      if (!map[c.task_id]) map[c.task_id] = {};
-      if (!map[c.task_id][c.member_id]) map[c.task_id][c.member_id] = { count: 0, pts: 0 };
-      map[c.task_id][c.member_id].count += 1;
-      map[c.task_id][c.member_id].pts += c.points_earned;
-    }
-    return map;
-  }, [otherDateCompletions]);
-
-  const fetchOtherDate = useCallback(async () => {
-    if (isToday || !householdId) return;
-    setLoadingOther(true);
-    const { data } = await supabase
-      .from('completions')
-      .select('*')
-      .eq('household_id', householdId)
-      .gte('completed_at', selectedDayBounds.start.toISOString())
-      .lte('completed_at', selectedDayBounds.end.toISOString());
-    if (data) setOtherDateCompletions(data as Completion[]);
-    setLoadingOther(false);
-  }, [isToday, householdId, selectedDayBounds]);
-
-  useEffect(() => {
-    if (isToday) {
-      setOtherDateCompletions([]);
-    } else {
-      fetchOtherDate();
-    }
-  }, [selectedDate, isToday, fetchOtherDate]);
-
-  const handleQuickUndo = async (taskId: string, memberId: string) => {
-    if (!householdId || !isEditable) return;
-    const key = `undo-${taskId}-${memberId}`;
-    setLoggingTask(prev => ({ ...prev, [key]: true }));
-
-    try {
-      const taskCompletions = getTaskCompletionsForDate(otherDateCompletions, taskId, selectedDate, memberId);
-      const latest = taskCompletions.reduce<Completion | null>((currentLatest, completion) => {
-        if (!currentLatest || completion.completed_at > currentLatest.completed_at) {
-          return completion;
-        }
-
-        return currentLatest;
-      }, null);
-
-      if (!latest) {
-        return;
-      }
-
-      await supabase.from('completions').delete().eq('id', latest.id);
-      await Promise.all([fetchOtherDate(), refreshData()]);
-    } finally {
-      setLoggingTask(prev => ({ ...prev, [key]: false }));
-    }
-  };
-
-  const handleQuickLog = async (taskId: string, memberId: string) => {
-    if (!householdId || !isEditable) return;
-    const task = tasks.find(t => t.id === taskId);
-    if (!task) return;
-    const key = `${taskId}-${memberId}`;
-    setLoggingTask(prev => ({ ...prev, [key]: true }));
-
-    try {
-      const existingCompletions = getTaskCompletionsForDate(otherDateCompletions, taskId, selectedDate, memberId);
-
-      if (existingCompletions.length >= task.max_per_cycle) {
-        return;
-      }
-
-      const completedAt = new Date(selectedDate);
-      completedAt.setHours(12, 0, 0, 0);
-
-      await supabase.from('completions').insert({
-        task_id: taskId,
-        household_id: householdId,
-        member_id: memberId,
-        points_earned: task.points,
-        completed_at: completedAt.toISOString(),
-      });
-
-      await Promise.all([fetchOtherDate(), refreshData()]);
-    } finally {
-      setLoggingTask(prev => ({ ...prev, [key]: false }));
-    }
-  };
-
-  const dateLabel = useMemo(() => {
-    if (isToday) return 'Today';
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const yesterday = new Date(today);
-    yesterday.setDate(today.getDate() - 1);
-    if (selectedDate.toDateString() === yesterday.toDateString()) return 'Yesterday';
-    return selectedDate.toLocaleDateString('en', { month: 'short', day: 'numeric', weekday: 'short' });
-  }, [isToday, selectedDate]);
-
-  // Today progress (earned pts / possible pts / completed task count)
+  // ── Today's progress — daily tasks only, so the bar can actually reach 100% ──
   const todayProgress = useMemo(() => {
-    if (!isToday || !currentMember) return { earned: 0, possible: 0, completedCount: 0, totalCount: tasks.length };
-    const todayStart = getDayBounds(new Date()).start;
+    const dailyTasks = tasks.filter(t => normalizeFrequency(t.frequency) === 'daily');
+    const { start, end } = getDayBounds(new Date());
     let earned = 0;
-    let completedCount = 0;
     let possible = 0;
-    for (const task of tasks) {
-      possible += task.max_per_cycle * task.points;
-      const todayCompletions = completions.filter(
-        c => c.member_id === currentMember.id && c.task_id === task.id && new Date(c.completed_at) >= todayStart
-      );
-      earned += todayCompletions.reduce((s, c) => s + c.points_earned, 0);
-      if (todayCompletions.length > 0) completedCount++;
-    }
-    return { earned, possible, completedCount, totalCount: tasks.length };
-  }, [isToday, currentMember, tasks, completions]);
+    let doneCount = 0;
 
-  // Current streak (consecutive days with any completion, up to 90 days)
+    for (const task of dailyTasks) {
+      possible += task.max_per_cycle * task.points;
+      const todays = completions.filter(c => {
+        if (c.task_id !== task.id) return false;
+        const at = new Date(c.completed_at);
+        return at >= start && at <= end;
+      });
+      earned += todays.reduce((s, c) => s + c.points_earned, 0);
+      if (todays.length > 0) doneCount++;
+    }
+    return { earned, possible, doneCount, total: dailyTasks.length };
+  }, [tasks, completions]);
+
   const currentStreak = useMemo(
     () => (currentMember ? calculateStreak(completions, currentMember.id) : 0),
     [currentMember, completions],
   );
 
-  // Mini achievements for the current member (only shown when isToday)
-  const miniAchievements = useMemo(() => {
-    if (!isToday || !currentMember) return [];
-    const badges: { icon: string; label: string }[] = [];
-    if (currentStreak >= 3) badges.push({ icon: '🔥', label: `${currentStreak}-Day Streak` });
-    if (currentStreak >= 30) badges.push({ icon: '💎', label: 'Consistency King' });
-    const dailyTasks = tasks.filter(t => t.frequency === 'daily');
-    if (dailyTasks.length > 0) {
-      const todayStart = getDayBounds(new Date()).start;
-      const allDone = dailyTasks.every(task =>
-        completions.some(c => c.member_id === currentMember.id && c.task_id === task.id && new Date(c.completed_at) >= todayStart)
-      );
-      if (allDone) badges.push({ icon: '🌟', label: 'Perfect Day' });
-    }
-    return badges;
-  }, [isToday, currentMember, currentStreak, tasks, completions]);
+  // ── Task grouping ────────────────────────────────────────────────────────
+  const groupedTasks = useMemo(() => {
+    const visible = filter === 'all'
+      ? tasks
+      : tasks.filter(t => normalizeFrequency(t.frequency) === filter);
+    return CATEGORIES
+      .map(cat => ({ ...cat, tasks: visible.filter(t => normalizeCategory(t.category) === cat.value) }))
+      .filter(g => g.tasks.length > 0);
+  }, [tasks, filter]);
 
-  // Notification hooks
+  // ── Past-day fetch (read-only) ───────────────────────────────────────────
+  const fetchPast = useCallback(async () => {
+    if (isToday || !householdId) return;
+    setLoadingPast(true);
+    const { start, end } = getDayBounds(selectedDate);
+    const { data } = await supabase
+      .from('completions')
+      .select('*')
+      .eq('household_id', householdId)
+      .gte('completed_at', start.toISOString())
+      .lte('completed_at', end.toISOString());
+    setPastCompletions((data as Completion[]) ?? []);
+    setLoadingPast(false);
+  }, [isToday, householdId, selectedDate]);
+
+  useEffect(() => {
+    if (isToday) setPastCompletions([]);
+    else fetchPast();
+  }, [isToday, fetchPast]);
+
+  // Group a past day's completions by task for the read-only summary.
+  const pastByTask = useMemo(() => {
+    const map = new Map<string, { count: number; pts: number; byMember: Record<string, number>; photos: string[] }>();
+    for (const c of pastCompletions) {
+      if (!map.has(c.task_id)) map.set(c.task_id, { count: 0, pts: 0, byMember: {}, photos: [] });
+      const entry = map.get(c.task_id)!;
+      entry.count += 1;
+      entry.pts += c.points_earned;
+      entry.byMember[c.member_id] = (entry.byMember[c.member_id] ?? 0) + 1;
+      if (c.photo_url) entry.photos.push(c.photo_url);
+    }
+    return map;
+  }, [pastCompletions]);
+
+  const pastDayPoints = useMemo(
+    () => members.map(m => ({
+      ...m,
+      pts: pastCompletions.filter(c => c.member_id === m.id).reduce((s, c) => s + c.points_earned, 0),
+    })),
+    [members, pastCompletions],
+  );
+
+  // ── Notifications ────────────────────────────────────────────────────────
   const { enabled: notificationsEnabled } = useNotifications();
   const getRemainingCount = useCallback(() => {
-    if (!currentMember) return 0;
-    const todayStart = getDayBounds(new Date()).start;
+    const { start, end } = getDayBounds(new Date());
     return tasks.filter(task => {
-      const done = completions.filter(
-        c => c.member_id === currentMember.id && c.task_id === task.id && new Date(c.completed_at) >= todayStart
-      ).length;
-      return done < task.max_per_cycle;
+      if (normalizeFrequency(task.frequency) !== 'daily') return false;
+      const doneToday = completions.filter(c => {
+        if (c.task_id !== task.id) return false;
+        const at = new Date(c.completed_at);
+        return at >= start && at <= end;
+      }).length;
+      return doneToday < task.max_per_cycle;
     }).length;
-  }, [tasks, completions, currentMember]);
-  useDailyReminder(isToday && notificationsEnabled, getRemainingCount);
+  }, [tasks, completions]);
+  useDailyReminder(notificationsEnabled, getRemainingCount);
+
+  const progressPct = todayProgress.possible > 0
+    ? Math.min(100, (todayProgress.earned / todayProgress.possible) * 100)
+    : 0;
 
   return (
     <div className="space-y-5">
-      {/* Greeting */}
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-        <h1 className="text-2xl font-extrabold text-foreground">
-          {greeting()}, {currentMember?.display_name?.split(' ')[0]} 👋
-        </h1>
-        <p className="text-muted-foreground text-sm mt-1">Tap a date to view or log completions</p>
-      </motion.div>
+      {/* Header */}
+      <div className="flex items-end justify-between">
+        <div>
+          <h1 className="text-xl font-bold tracking-tight">
+            {currentMember?.display_name?.split(' ')[0]}，今天
+          </h1>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            {new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' })}
+          </p>
+        </div>
+        {currentStreak >= 2 && (
+          <div className="flex items-center gap-1 text-xs font-semibold">
+            <Flame className="w-3.5 h-3.5 text-orange-500" strokeWidth={2} />
+            <span>{currentStreak} 天</span>
+          </div>
+        )}
+      </div>
 
-      {/* Today Progress */}
-      {isToday && (
+      <MonthDuelCard compact />
+
+      {/* Today's progress */}
+      <div className="rounded-xl border p-4">
+        <div className="flex items-baseline justify-between mb-2">
+          <p className="text-xs font-semibold text-muted-foreground">今日进度</p>
+          <p className="text-xs text-muted-foreground">
+            每天任务 {todayProgress.doneCount}/{todayProgress.total}
+          </p>
+        </div>
+        <div className="flex items-baseline gap-1">
+          <span className="text-2xl font-bold tabular-nums">{todayProgress.earned}</span>
+          <span className="text-xs text-muted-foreground">/ {todayProgress.possible} 分</span>
+        </div>
+        <div className="h-1.5 rounded-full bg-muted overflow-hidden mt-2.5">
+          <div className="h-full bg-foreground transition-all duration-500" style={{ width: `${progressPct}%` }} />
+        </div>
+      </div>
+
+      {/* 7-day strip */}
+      <div className="flex gap-1.5">
+        {dayStrip.map(d => {
+          const active = d.offset === selectedOffset;
+          return (
+            <button
+              key={d.offset}
+              onClick={() => setSelectedOffset(d.offset)}
+              className={`flex-1 rounded-lg border py-2 flex flex-col items-center gap-1 transition-colors ${
+                active ? 'border-foreground bg-muted' : 'hover:bg-muted/50'
+              }`}
+            >
+              <span className="text-[10px] text-muted-foreground">{d.weekday}</span>
+              <span className={`text-xs tabular-nums ${active ? 'font-bold' : ''}`}>{d.dayOfMonth}</span>
+              <span className="flex gap-0.5 h-1">
+                {members.map(m => (
+                  <span
+                    key={m.id}
+                    className="w-1 h-1 rounded-full"
+                    style={{ backgroundColor: d.actors.has(m.id) ? m.avatar_color : 'transparent' }}
+                  />
+                ))}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {isToday ? (
         <>
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="bg-card rounded-2xl border p-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <p className="text-sm font-bold text-foreground">Today's Progress</p>
-              {currentStreak >= 2 && (
-                <Badge variant="secondary" className="text-xs font-bold">
-                  🔥 {currentStreak}-day streak
-                </Badge>
-              )}
-            </div>
-            <div className="flex items-end justify-between">
-              <p className="text-2xl font-extrabold text-primary">{todayProgress.earned}<span className="text-sm font-semibold text-muted-foreground ml-1">/ {todayProgress.possible} pts</span></p>
-              <p className="text-xs text-muted-foreground">{todayProgress.completedCount}/{todayProgress.totalCount} tasks done</p>
-            </div>
-            <Progress value={todayProgress.possible > 0 ? (todayProgress.earned / todayProgress.possible) * 100 : 0} className="h-2" />
-          </motion.div>
+          {/* Frequency filter */}
+          <div className="flex gap-1 p-0.5 rounded-lg bg-muted">
+            {FILTERS.map(f => (
+              <button
+                key={f.value}
+                onClick={() => setFilter(f.value)}
+                className={`flex-1 text-xs py-1.5 rounded-md font-medium transition-colors ${
+                  filter === f.value ? 'bg-background shadow-sm' : 'text-muted-foreground'
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
 
-          {/* Mini achievements */}
-          {miniAchievements.length > 0 && (
-            <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }} className="flex flex-wrap gap-2">
-              {miniAchievements.map((a, i) => (
-                <Badge key={i} variant="outline" className="text-xs font-semibold gap-1 px-2 py-1">
-                  <span>{a.icon}</span> {a.label}
-                </Badge>
-              ))}
-            </motion.div>
+          {tasks.length === 0 ? (
+            /* Never claim the list is empty when we simply failed to load it. */
+            loadError ? (
+              <p className="text-center text-sm text-muted-foreground py-10">
+                任务没能加载出来，请用上方的「重试」再试一次。
+              </p>
+            ) : (
+              <p className="text-center text-sm text-muted-foreground py-10">
+                还没有任务。到「设置 → 管理任务」添加，或一键载入默认清单。
+              </p>
+            )
+          ) : groupedTasks.length === 0 ? (
+            <p className="text-center text-sm text-muted-foreground py-10">这个频率下没有任务</p>
+          ) : (
+            groupedTasks.map(group => (
+              <div key={group.value}>
+                <div className="flex items-center gap-2 mb-1">
+                  <TaskIcon name={group.icon} className="w-3.5 h-3.5" />
+                  <h2 className="text-xs font-semibold text-muted-foreground">{group.label}</h2>
+                  <div className="flex-1 h-px bg-border" />
+                </div>
+                <div className="divide-y">
+                  {group.tasks.map(task => <TaskRow key={task.id} task={task} />)}
+                </div>
+              </div>
+            ))
           )}
         </>
-      )}
+      ) : (
+        /* ── Past day: read-only ── */
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-semibold">
+              {selectedDate.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' })}
+            </p>
+            <span className="text-[11px] text-muted-foreground bg-muted px-2 py-0.5 rounded-full">仅可查看</span>
+          </div>
 
-      {/* Calendar */}
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="bg-card rounded-2xl border overflow-hidden"
-      >
-        <Calendar
-          mode="single"
-          selected={selectedDate}
-          onSelect={day => { if (day) setSelectedDate(day); }}
-          className="w-full"
-          disabled={{ after: new Date() }}
-          modifiers={{
-            hasCompletions: (day) => {
-              const key = `${day.getFullYear()}-${day.getMonth()}-${day.getDate()}`;
-              return daysWithCompletions.has(key);
-            },
-          }}
-          modifiersStyles={{
-            hasCompletions: {
-              fontWeight: 'bold',
-              textDecoration: 'underline',
-              textDecorationColor: members[0]?.avatar_color ?? '#0D9488',
-              textUnderlineOffset: '3px',
-            },
-          }}
-        />
-      </motion.div>
-
-      {/* Date header pill */}
-      <motion.div
-        key={selectedDate.toDateString()}
-        initial={{ opacity: 0, y: 4 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="flex items-center justify-between"
-      >
-        <span className="text-lg font-bold text-foreground">{dateLabel}</span>
-        {!isToday && (
-          <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded-full">View only · 仅可查看</span>
-        )}
-      </motion.div>
-
-      {/* Points mini-board */}
-      <div className="grid grid-cols-2 gap-3">
-        {dayPoints.map(m => (
-          <motion.div
-            key={m.id}
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="rounded-2xl p-4 border"
-            style={{ backgroundColor: `${m.avatar_color}15` }}
-          >
-            <div className="flex items-center gap-2 mb-1">
-              <div
-                className="w-6 h-6 rounded-full text-xs font-bold flex items-center justify-center text-primary-foreground"
-                style={{ backgroundColor: m.avatar_color }}
-              >
-                {m.display_name.charAt(0)}
+          <div className="grid grid-cols-2 gap-2">
+            {pastDayPoints.map(m => (
+              <div key={m.id} className="rounded-xl border p-3">
+                <div className="flex items-center gap-1.5 mb-1">
+                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: m.avatar_color }} />
+                  <span className="text-xs text-muted-foreground truncate">{m.display_name.split(' ')[0]}</span>
+                </div>
+                <p className="text-xl font-bold tabular-nums" style={{ color: m.avatar_color }}>{m.pts}</p>
               </div>
-              <span className="text-sm font-semibold text-foreground truncate">{m.display_name.split(' ')[0]}</span>
-            </div>
-            <p className="text-3xl font-extrabold" style={{ color: m.avatar_color }}>{m.pts}</p>
-            <p className="text-xs text-muted-foreground">pts {isToday ? 'today' : 'that day'}</p>
-          </motion.div>
-        ))}
-      </div>
+            ))}
+          </div>
 
-      {/* Task section */}
-      <div className="space-y-5">
-        <h2 className="text-lg font-bold text-foreground">
-          {isToday ? "Today's Tasks" : 'Tasks that day'}
-        </h2>
-
-        {tasks.length === 0 && (
-          <p className="text-center text-muted-foreground py-8">No tasks yet. Add some in the Tasks tab!</p>
-        )}
-
-        {loadingOther && !isToday && (
-          <p className="text-muted-foreground text-sm py-4 text-center">Loading...</p>
-        )}
-
-        {(!loadingOther || isToday) && groupedTasks.map((group, gi) => (
-          <motion.div
-            key={group.value}
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: gi * 0.04 }}
-          >
-            {/* Category header */}
-            <div className="flex items-center gap-2 mb-2">
-              <span className="text-base">{group.emoji}</span>
-              <h3 className="font-semibold text-foreground text-sm">{group.label}</h3>
-              <div className="flex-1 h-px bg-border" />
-            </div>
-
-            <div className={isToday ? "grid grid-cols-3 gap-2" : "space-y-2"}>
-              {isToday
-                ? group.tasks.map((task, i) => (
-                    <motion.div
-                      key={task.id}
-                      initial={{ opacity: 0, y: 6 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: gi * 0.04 + i * 0.04 }}
-                    >
-                      <TaskCard task={task} onComplete={refreshData} compact />
-                    </motion.div>
-                  ))
-                : group.tasks.map((task, i) => {
-                    const taskStats = otherDateStatsByTask[task.id] ?? {};
-                    const taskPhotos = otherDateCompletions
-                      .filter(c => c.task_id === task.id && c.photo_url)
-                      .map(c => c.photo_url as string);
-                    return (
-                      <motion.div
-                        key={task.id}
-                        initial={{ opacity: 0, y: 6 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: gi * 0.04 + i * 0.04 }}
-                        className="bg-card rounded-2xl border p-4 shadow-sm"
+          {loadingPast ? (
+            <p className="text-center text-sm text-muted-foreground py-8">加载中…</p>
+          ) : pastByTask.size === 0 ? (
+            <p className="text-center text-sm text-muted-foreground py-8">这天没有记录</p>
+          ) : (
+            <div className="divide-y">
+              {tasks.filter(t => pastByTask.has(t.id)).map(task => {
+                const entry = pastByTask.get(task.id)!;
+                return (
+                  <div key={task.id} className="flex items-center gap-3 py-2.5">
+                    <div className="w-9 h-9 rounded-lg bg-muted flex items-center justify-center flex-shrink-0 text-muted-foreground">
+                      <TaskIcon name={task.icon} className="w-[18px] h-[18px]" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{task.name}</p>
+                      <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground mt-0.5">
+                        <span>+{entry.pts} 分</span>
+                        {members.map(m => {
+                          const count = entry.byMember[m.id];
+                          if (!count) return null;
+                          return (
+                            <span key={m.id} className="flex items-center gap-0.5 font-medium" style={{ color: m.avatar_color }}>
+                              <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: m.avatar_color }} />
+                              {count}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    {entry.photos.slice(0, 3).map((url, i) => (
+                      <button
+                        key={i}
+                        onClick={() => setPreviewPhoto(url)}
+                        className="w-8 h-8 rounded-lg overflow-hidden border flex-shrink-0"
+                        title="查看照片"
                       >
-                        <div className="flex items-start gap-3">
-                          <div className="text-3xl flex-shrink-0">{task.icon}</div>
-                          <div className="flex-1 min-w-0">
-                            <h3 className="font-bold text-foreground truncate">{task.name}</h3>
-                            <div className="flex items-center gap-2 mt-0.5">
-                              <Star className="w-3.5 h-3.5 text-amber-500" />
-                              <span className="text-sm font-semibold text-amber-600">{task.points} pts each</span>
-                            </div>
-                            {/* Who completed it — single-pass via pre-computed map */}
-                            <div className="mt-2 space-y-0.5">
-                              {members.map(m => {
-                                const stat = taskStats[m.id];
-                                if (!stat) return (
-                                  <p key={m.id} className="text-xs text-muted-foreground">{m.display_name.split(' ')[0]}: none</p>
-                                );
-                                return (
-                                  <p key={m.id} className="text-xs font-semibold" style={{ color: m.avatar_color }}>
-                                    {m.display_name.split(' ')[0]} ×{stat.count} (+{stat.pts} pts)
-                                  </p>
-                                );
-                              })}
-                            </div>
-                            {taskPhotos.length > 0 && (
-                              <div className="flex gap-1.5 mt-2 flex-wrap">
-                                {taskPhotos.map((u, idx) => (
-                                  <button
-                                    key={idx}
-                                    onClick={() => setPreviewPhoto(u)}
-                                    className="w-12 h-12 rounded-lg overflow-hidden border-2 border-primary/30 hover:border-primary transition-colors"
-                                    title="查看照片"
-                                  >
-                                    <img src={u} alt="proof" className="w-full h-full object-cover" />
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-                            {/* Quick log + undo buttons — only available for editable dates */}
-                            {isEditable && (
-                              <div className="flex flex-wrap gap-2 mt-3">
-                                {members.map(m => {
-                                  const logKey = `${task.id}-${m.id}`;
-                                  const undoKey = `undo-${task.id}-${m.id}`;
-                                  const hasEntry = !!(taskStats[m.id]?.count);
-                                  return (
-                                    <div key={m.id} className="flex gap-1">
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="text-xs h-7 px-3"
-                                        disabled={loggingTask[logKey]}
-                                        onClick={() => handleQuickLog(task.id, m.id)}
-                                        style={{ borderColor: m.avatar_color, color: m.avatar_color }}
-                                      >
-                                        <Plus className="w-3 h-3 mr-1" />
-                                        {m.display_name.split(' ')[0]}
-                                      </Button>
-                                      {hasEntry && (
-                                        <Button
-                                          variant="ghost"
-                                          size="sm"
-                                          className="text-xs h-7 w-7 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                                          disabled={loggingTask[undoKey]}
-                                          onClick={() => handleQuickUndo(task.id, m.id)}
-                                          title={`Undo last ${m.display_name.split(' ')[0]} entry`}
-                                        >
-                                          <Minus className="w-3 h-3" />
-                                        </Button>
-                                      )}
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </motion.div>
-                    );
-                  })
-              }
+                        <img src={url} alt="完成照片" className="w-full h-full object-cover" />
+                      </button>
+                    ))}
+                  </div>
+                );
+              })}
             </div>
-          </motion.div>
-        ))}
-      </div>
+          )}
+        </div>
+      )}
 
       {previewPhoto && <PhotoLightbox url={previewPhoto} onClose={() => setPreviewPhoto(null)} />}
     </div>

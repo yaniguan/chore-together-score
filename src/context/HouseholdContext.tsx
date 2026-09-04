@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import { supabase } from '@/integrations/supabase/client';
 import { parseStoredHouseholdMember } from '@/lib/householdStorage';
 import { getMonthKey, getMonthRange } from '@/lib/monthCycle';
+import { SEED_TASKS } from '@/lib/seedTasks';
 
 export interface HouseholdMember {
   id: string;
@@ -84,11 +85,11 @@ interface HouseholdContextType {
   members: HouseholdMember[];
   tasks: Task[];
   completions: Completion[];
-  allTimePoints: Record<string, number>;
   rewards: Reward[];
   redemptions: Redemption[];
   monthlyScores: MonthlyScore[];
   shoppingItems: ShoppingItem[];
+  loadError: string | null;
   monthEarned: Record<string, number>;
   monthSpent: Record<string, number>;
   availablePoints: Record<string, number>;
@@ -115,33 +116,6 @@ export const useHousehold = () => {
   return ctx;
 };
 
-// Default Chinese task list (categories: kitchen / bathroom / dog / other).
-export const SEED_TASKS = [
-  // 厨房 Kitchen
-  { name: '做饭',       icon: '🍳',  category: 'kitchen',  frequency: 'daily',  frequency_value: 1, max_per_cycle: 3, points: 5, color_tag: '#F59E0B' },
-  { name: '收拾',       icon: '🧽',  category: 'kitchen',  frequency: 'daily',  frequency_value: 1, max_per_cycle: 3, points: 3, color_tag: '#F59E0B' },
-  { name: '灶台',       icon: '🔥',  category: 'kitchen',  frequency: 'daily',  frequency_value: 1, max_per_cycle: 1, points: 3, color_tag: '#F59E0B' },
-  { name: '微波炉',     icon: '📦',  category: 'kitchen',  frequency: 'weekly', frequency_value: 1, max_per_cycle: 1, points: 3, color_tag: '#F59E0B' },
-  { name: '洗碗池',     icon: '🚰',  category: 'kitchen',  frequency: 'daily',  frequency_value: 1, max_per_cycle: 1, points: 4, color_tag: '#F59E0B' },
-  { name: '冰箱',       icon: '🧊',  category: 'kitchen',  frequency: 'weekly', frequency_value: 1, max_per_cycle: 1, points: 5, color_tag: '#F59E0B' },
-  { name: '大理石板',   icon: '🪨',  category: 'kitchen',  frequency: 'daily',  frequency_value: 1, max_per_cycle: 1, points: 3, color_tag: '#F59E0B' },
-  { name: '扔垃圾(厨房)', icon: '🗑️', category: 'kitchen',  frequency: 'daily',  frequency_value: 1, max_per_cycle: 2, points: 3, color_tag: '#F59E0B' },
-  // 厕所 Bathroom
-  { name: '浴缸',       icon: '🛁',  category: 'bathroom', frequency: 'weekly', frequency_value: 1, max_per_cycle: 1, points: 6, color_tag: '#EC4899' },
-  { name: '马桶',       icon: '🚽',  category: 'bathroom', frequency: 'weekly', frequency_value: 2, max_per_cycle: 1, points: 5, color_tag: '#EC4899' },
-  { name: '镜子',       icon: '🪞',  category: 'bathroom', frequency: 'weekly', frequency_value: 1, max_per_cycle: 1, points: 2, color_tag: '#EC4899' },
-  { name: '洗脸池',     icon: '🚿',  category: 'bathroom', frequency: 'weekly', frequency_value: 2, max_per_cycle: 1, points: 3, color_tag: '#EC4899' },
-  { name: '扔垃圾(厕所)', icon: '🗑️', category: 'bathroom', frequency: 'weekly', frequency_value: 2, max_per_cycle: 1, points: 2, color_tag: '#EC4899' },
-  // 狗 Dog
-  { name: '遛狗',       icon: '🐕',  category: 'dog',      frequency: 'daily',  frequency_value: 1, max_per_cycle: 3, points: 5, color_tag: '#0D9488' },
-  { name: '喂饭',       icon: '🍖',  category: 'dog',      frequency: 'daily',  frequency_value: 1, max_per_cycle: 2, points: 3, color_tag: '#0D9488' },
-  { name: '刷牙',       icon: '🪥',  category: 'dog',      frequency: 'daily',  frequency_value: 1, max_per_cycle: 1, points: 2, color_tag: '#0D9488' },
-  { name: '洗澡',       icon: '🛀',  category: 'dog',      frequency: 'weekly', frequency_value: 1, max_per_cycle: 1, points: 8, color_tag: '#0D9488' },
-  // 其他综合 Other
-  { name: '扫地',       icon: '🧹',  category: 'other',    frequency: 'daily',  frequency_value: 1, max_per_cycle: 1, points: 4, color_tag: '#6B7280' },
-  { name: '拖地',       icon: '🪣',  category: 'other',    frequency: 'weekly', frequency_value: 2, max_per_cycle: 1, points: 6, color_tag: '#6B7280' },
-];
-
 export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [householdId, setHouseholdIdState] = useState<string | null>(() => localStorage.getItem(HOUSEHOLD_ID_STORAGE_KEY));
   const [currentMember, setCurrentMemberState] = useState<HouseholdMember | null>(() => {
@@ -157,11 +131,11 @@ export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [members, setMembers] = useState<HouseholdMember[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [completions, setCompletions] = useState<Completion[]>([]);
-  const [allTimePoints, setAllTimePoints] = useState<Record<string, number>>({});
   const [rewards, setRewards] = useState<Reward[]>([]);
   const [redemptions, setRedemptions] = useState<Redemption[]>([]);
   const [monthlyScores, setMonthlyScores] = useState<MonthlyScore[]>([]);
   const [shoppingItems, setShoppingItems] = useState<ShoppingItem[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const setHouseholdId = (id: string) => {
     localStorage.setItem(HOUSEHOLD_ID_STORAGE_KEY, id);
@@ -181,7 +155,6 @@ export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setMembers([]);
     setTasks([]);
     setCompletions([]);
-    setAllTimePoints({});
     setRewards([]);
     setRedemptions([]);
     setMonthlyScores([]);
@@ -194,32 +167,34 @@ export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const ninetyDaysAgo = new Date();
     ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
 
-    const [membersRes, tasksRes, completionsRes, allPtsRes, rewardsRes, redemptionsRes, monthlyRes, shoppingRes] = await Promise.all([
+    const [membersRes, tasksRes, completionsRes, rewardsRes, redemptionsRes, monthlyRes, shoppingRes] = await Promise.all([
       supabase.from('household_members').select('*').eq('household_id', householdId),
       supabase.from('tasks').select('*').eq('household_id', householdId).order('created_at'),
       supabase.from('completions').select('*')
         .eq('household_id', householdId)
         .gte('completed_at', ninetyDaysAgo.toISOString())
         .order('completed_at', { ascending: false }),
-      supabase.from('completions').select('member_id, points_earned').eq('household_id', householdId),
       supabase.from('rewards').select('*').eq('household_id', householdId).order('created_at'),
       supabase.from('redemptions').select('*').eq('household_id', householdId).order('redeemed_at', { ascending: false }),
       supabase.from('monthly_scores').select('*').eq('household_id', householdId).order('year_month', { ascending: false }),
       supabase.from('shopping_items').select('*').eq('household_id', householdId).order('added_at', { ascending: false }),
     ]);
 
+    // Surface load failures instead of silently rendering an empty household —
+    // "No tasks yet" when the database is unreachable reads as data loss.
+    const firstError = [membersRes, tasksRes, completionsRes, rewardsRes, redemptionsRes, monthlyRes, shoppingRes]
+      .map(r => r.error)
+      .find(Boolean);
+    if (firstError) {
+      console.error('refreshData failed', firstError);
+      setLoadError(firstError.message || '无法连接数据库');
+      return;
+    }
+    setLoadError(null);
+
     if (membersRes.data) setMembers(membersRes.data as HouseholdMember[]);
     if (tasksRes.data) setTasks(tasksRes.data as Task[]);
     if (completionsRes.data) setCompletions(completionsRes.data as Completion[]);
-
-    if (allPtsRes.data) {
-      const pts: Record<string, number> = {};
-      for (const row of allPtsRes.data) {
-        pts[row.member_id] = (pts[row.member_id] ?? 0) + row.points_earned;
-      }
-      setAllTimePoints(pts);
-    }
-
     if (rewardsRes.data) setRewards(rewardsRes.data as Reward[]);
     if (redemptionsRes.data) setRedemptions(redemptionsRes.data as Redemption[]);
     if (monthlyRes.data) setMonthlyScores(monthlyRes.data as MonthlyScore[]);
@@ -346,22 +321,38 @@ export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
   }, [householdId, seedTasks, refreshData]);
 
-  // Realtime subscriptions
+  // Realtime subscriptions. Every table change used to fire a full refresh, so
+  // a burst of taps meant a burst of 7-query round-trips on both devices —
+  // debounce so a burst collapses into one refresh.
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!householdId) return;
 
-    const channel = supabase
-      .channel('homepace-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks', filter: `household_id=eq.${householdId}` }, () => refreshData())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'completions', filter: `household_id=eq.${householdId}` }, () => refreshData())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'household_members', filter: `household_id=eq.${householdId}` }, () => refreshData())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'rewards', filter: `household_id=eq.${householdId}` }, () => refreshData())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'redemptions', filter: `household_id=eq.${householdId}` }, () => refreshData())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'monthly_scores', filter: `household_id=eq.${householdId}` }, () => refreshData())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'shopping_items', filter: `household_id=eq.${householdId}` }, () => refreshData())
-      .subscribe();
+    const scheduleRefresh = () => {
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+      refreshTimerRef.current = setTimeout(() => {
+        refreshTimerRef.current = null;
+        refreshData();
+      }, 400);
+    };
 
-    return () => { supabase.removeChannel(channel); };
+    const tables = ['tasks', 'completions', 'household_members', 'rewards',
+                    'redemptions', 'monthly_scores', 'shopping_items'] as const;
+
+    let channel = supabase.channel('homepace-realtime');
+    for (const table of tables) {
+      channel = channel.on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table, filter: `household_id=eq.${householdId}` },
+        scheduleRefresh,
+      );
+    }
+    channel.subscribe();
+
+    return () => {
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+      supabase.removeChannel(channel);
+    };
   }, [householdId, refreshData]);
 
   // Current month earned (from completions) and spent (from redemptions).
@@ -398,7 +389,7 @@ export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   return (
     <HouseholdContext.Provider value={{
       householdId, currentMember, members, tasks, completions,
-      allTimePoints, rewards, redemptions, monthlyScores, shoppingItems,
+      rewards, redemptions, monthlyScores, shoppingItems, loadError,
       monthEarned, monthSpent, availablePoints,
       setCurrentMember, setHouseholdId, logout, refreshData,
       resetTasksToDefaults, uploadProofPhoto,

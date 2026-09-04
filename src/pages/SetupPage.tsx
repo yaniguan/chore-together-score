@@ -65,7 +65,10 @@ const SetupPage: React.FC = () => {
       .select('*')
       .eq('pin', joinPin);
 
-    if (!households || households.length === 0) { setError('No household found with that PIN'); setLoading(false); return; }
+    if (!households || households.length === 0) { setError('没有找到这个密码对应的家庭'); setLoading(false); return; }
+    // PIN has no uniqueness constraint; silently picking the first match would
+    // drop someone into a stranger's household.
+    if (households.length > 1) { setError('这个密码对应多个家庭，请换一个密码重新创建'); setLoading(false); return; }
 
     const hId = households[0].id;
     const { data: members } = await supabase

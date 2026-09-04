@@ -28,3 +28,17 @@ export const isDateEditable = (date: Date): boolean => {
   target.setHours(0, 0, 0, 0);
   return target.getTime() === today.getTime();
 };
+
+// Whole days left in the current month, counting today as remaining.
+export const daysLeftInMonth = (now: Date = new Date()): number => {
+  const { end } = getMonthRange(now);
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  return Math.max(0, Math.round((end.getTime() - today.getTime()) / 86_400_000));
+};
+
+export const shortMonthLabel = (yearMonth: string): string => {
+  const [y, m] = yearMonth.split('-').map(Number);
+  if (!y || !m) return yearMonth;
+  return `${m}月`;
+};

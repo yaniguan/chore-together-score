@@ -1,13 +1,20 @@
 import React, { useState, useMemo } from 'react';
 import { Task, useHousehold } from '@/context/HouseholdContext';
 import { supabase } from '@/integrations/supabase/client';
+import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Plus, Pencil, Trash2, RotateCcw } from 'lucide-react';
-import { motion } from 'framer-motion';
-import { CATEGORIES, CategoryValue, normalizeCategory } from '@/lib/constants';
+import { Plus, Pencil, Trash2, RotateCcw, ChevronLeft } from 'lucide-react';
+import { toast } from 'sonner';
+import {
+  CATEGORIES, CategoryValue, FREQUENCIES, FrequencyValue,
+  normalizeCategory, normalizeFrequency, frequencyLabel,
+} from '@/lib/constants';
+import { CATEGORY_COLORS } from '@/lib/seedTasks';
+import { ICON_GROUPS, TaskIcon } from '@/lib/taskIcons';
+import { cycleLabel } from '@/lib/completions';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -19,76 +26,60 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 
-const EMOJI_OPTIONS = [
-  // Cleaning
-  '🧹', '🧽', '🪣', '🧴', '🫧', '🧺', '🪥', '🧻', '🗑️', '🪠', '🫙', '🪟',
-  // Kitchen & Cooking
-  '🍳', '🍽️', '🥄', '☕', '🫖', '🥘', '🫕', '🧂', '🍱', '🥗', '🔪', '🍵',
-  // Bathroom
-  '🚿', '🛁', '🚽', '🪒',
-  // Bedroom & Laundry
-  '🛏️', '👕', '👔', '🧣', '🪡',
-  // Shopping & Errands
-  '🛒', '🛍️', '📬', '💊', '📦', '🔑',
-  // Outdoor & Garden
-  '🌿', '🪴', '🌱', '🌻', '🍀', '🌳', '🌾', '🪺',
-  // Pets
-  '🐕', '🐈', '🐾', '🦮', '🐠', '🐇', '🐓', '🍖',
-  // Food & Groceries
-  '🥦', '🥛', '🍎', '🥩', '🥚', '🧃',
-  // Home & Utilities
-  '🏠', '🔧', '🔨', '💡', '⚡', '🧯', '🚪', '🔌',
-];
-const COLOR_OPTIONS = ['#0D9488', '#F97066', '#F59E0B', '#8B5CF6', '#EC4899', '#3B82F6', '#6B7280', '#10B981'];
-
 interface TaskFormData {
   name: string;
   icon: string;
   category: CategoryValue;
-  frequency: string;
-  frequency_value: number;
+  frequency: FrequencyValue;
   max_per_cycle: number;
   points: number;
-  assigned_to: string;
-  color_tag: string;
 }
 
 const defaultForm: TaskFormData = {
-  name: '', icon: '🏠', category: 'other', frequency: 'daily',
-  frequency_value: 1, max_per_cycle: 1, points: 5, assigned_to: 'both', color_tag: '#0D9488',
+  name: '', icon: 'sparkles', category: 'cleaning', frequency: 'daily',
+  max_per_cycle: 1, points: 3,
 };
 
 const TasksPage: React.FC = () => {
-  const { tasks, householdId, members, currentMember, refreshData, resetTasksToDefaults } = useHousehold();
+  const { tasks, householdId, currentMember, refreshData, resetTasksToDefaults, loadError } = useHousehold();
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<TaskFormData>(defaultForm);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Task | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const handleSave = async () => {
     if (!form.name.trim() || !householdId) return;
+    setSaving(true);
+    const payload = {
+      name: form.name.trim(),
+      icon: form.icon,
+      category: form.category,
+      frequency: form.frequency,
+      frequency_value: 1,
+      max_per_cycle: form.max_per_cycle,
+      points: form.points,
+      color_tag: CATEGORY_COLORS[form.category],
+    };
 
-    if (editingId) {
-      await supabase.from('tasks').update({
-        name: form.name,
-        icon: form.icon,
-        category: form.category,
-        frequency: form.frequency,
-        frequency_value: form.frequency_value,
-        max_per_cycle: form.max_per_cycle,
-        points: form.points,
-        assigned_to: form.assigned_to,
-        color_tag: form.color_tag,
-      }).eq('id', editingId);
-    } else {
-      await supabase.from('tasks').insert({
-        ...form,
-        household_id: householdId,
-        created_by: currentMember?.id,
-      });
+    const { error } = editingId
+      ? await supabase.from('tasks').update(payload).eq('id', editingId)
+      : await supabase.from('tasks').insert({
+          ...payload,
+          household_id: householdId,
+          assigned_to: 'both',
+          created_by: currentMember?.id ?? null,
+        });
+    setSaving(false);
+
+    if (error) {
+      toast.error(`保存失败: ${error.message}`);
+      return;
     }
-
     setOpen(false);
     setForm(defaultForm);
     setEditingId(null);
@@ -100,238 +91,274 @@ const TasksPage: React.FC = () => {
       name: task.name,
       icon: task.icon,
       category: normalizeCategory(task.category),
-      frequency: task.frequency,
-      frequency_value: task.frequency_value || 1,
+      frequency: normalizeFrequency(task.frequency),
       max_per_cycle: task.max_per_cycle,
       points: task.points,
-      assigned_to: task.assigned_to,
-      color_tag: task.color_tag,
     });
     setEditingId(task.id);
     setOpen(true);
   };
 
-  const handleDelete = async (id: string) => {
-    await supabase.from('tasks').delete().eq('id', id);
+  // Deleting a task cascades to its completions, so this always goes through
+  // a confirmation — it silently rewrites past months otherwise.
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    const { error } = await supabase.from('tasks').delete().eq('id', deleteTarget.id);
+    setDeleting(false);
+    if (error) {
+      toast.error(`删除失败: ${error.message}`);
+      return;
+    }
+    setDeleteTarget(null);
     refreshData();
   };
-
-  // Group tasks by category, preserving CATEGORIES order
-  const grouped = useMemo(() => {
-    return CATEGORIES
-      .map(cat => ({
-        ...cat,
-        tasks: tasks.filter(t => normalizeCategory(t.category) === cat.value),
-      }))
-      .filter(g => g.tasks.length > 0);
-  }, [tasks]);
 
   const handleReset = async () => {
     setResetting(true);
     try {
       await resetTasksToDefaults();
+      toast.success('已载入默认清单');
       setResetOpen(false);
+    } catch (e) {
+      toast.error(`重置失败: ${e instanceof Error ? e.message : '未知错误'}`);
     } finally {
       setResetting(false);
     }
   };
 
+  const grouped = useMemo(() =>
+    CATEGORIES
+      .map(cat => ({ ...cat, tasks: tasks.filter(t => normalizeCategory(t.category) === cat.value) }))
+      .filter(g => g.tasks.length > 0),
+    [tasks],
+  );
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between gap-2">
-        <h1 className="text-2xl font-extrabold text-foreground">Tasks</h1>
-
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            className="rounded-xl"
-            onClick={() => setResetOpen(true)}
-            title="重置为默认任务列表"
-          >
-            <RotateCcw className="w-4 h-4 mr-1" /> 重置
-          </Button>
-          <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) { setForm(defaultForm); setEditingId(null); } }}>
-            <DialogTrigger asChild>
-              <Button className="rounded-xl font-bold" size="sm">
-                <Plus className="w-4 h-4 mr-1" /> Add Task
-              </Button>
-            </DialogTrigger>
-          <DialogContent className="rounded-2xl max-w-sm mx-auto max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>{editingId ? 'Edit Task' : 'New Task'}</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4">
-              <Input
-                placeholder="Task name"
-                value={form.name}
-                onChange={e => setForm({ ...form, name: e.target.value })}
-                className="rounded-xl"
-              />
-
-              {/* Category picker */}
-              <div>
-                <p className="text-sm font-semibold text-muted-foreground mb-2">Area</p>
-                <div className="grid grid-cols-3 gap-2">
-                  {CATEGORIES.map(cat => (
-                    <button
-                      key={cat.value}
-                      onClick={() => setForm({ ...form, category: cat.value })}
-                      className={`flex flex-col items-center gap-1 p-2 rounded-xl border text-xs font-semibold transition-colors ${
-                        form.category === cat.value
-                          ? 'bg-primary/10 border-primary text-primary'
-                          : 'border-border text-muted-foreground hover:bg-muted'
-                      }`}
-                    >
-                      <span className="text-xl">{cat.emoji}</span>
-                      {cat.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Emoji picker */}
-              <div>
-                <p className="text-sm font-semibold text-muted-foreground mb-2">Icon</p>
-                <div className="flex flex-wrap gap-2">
-                  {EMOJI_OPTIONS.map(e => (
-                    <button
-                      key={e}
-                      onClick={() => setForm({ ...form, icon: e })}
-                      className={`text-2xl p-1.5 rounded-lg ${form.icon === e ? 'bg-primary/20 ring-2 ring-primary' : 'hover:bg-muted'}`}
-                    >
-                      {e}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Color */}
-              <div>
-                <p className="text-sm font-semibold text-muted-foreground mb-2">Color Tag</p>
-                <div className="flex gap-2">
-                  {COLOR_OPTIONS.map(c => (
-                    <button
-                      key={c}
-                      onClick={() => setForm({ ...form, color_tag: c })}
-                      className={`w-8 h-8 rounded-full ${form.color_tag === c ? 'ring-2 ring-primary ring-offset-2 ring-offset-background' : ''}`}
-                      style={{ backgroundColor: c }}
-                    />
-                  ))}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <p className="text-sm font-semibold text-muted-foreground mb-1">Points</p>
-                  <Input type="number" min={1} value={form.points} onChange={e => setForm({ ...form, points: parseInt(e.target.value) || 1 })} className="rounded-xl" />
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-muted-foreground mb-1">Max / Day</p>
-                  <Input type="number" min={1} value={form.max_per_cycle} onChange={e => setForm({ ...form, max_per_cycle: parseInt(e.target.value) || 1 })} className="rounded-xl" />
-                </div>
-              </div>
-
-              <div>
-                <p className="text-sm font-semibold text-muted-foreground mb-1">Frequency</p>
-                <Select value={form.frequency} onValueChange={v => setForm({ ...form, frequency: v })}>
-                  <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="daily">Daily</SelectItem>
-                    <SelectItem value="weekly">Weekly</SelectItem>
-                    <SelectItem value="custom">Custom</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <p className="text-sm font-semibold text-muted-foreground mb-1">Assigned to</p>
-                <Select value={form.assigned_to} onValueChange={v => setForm({ ...form, assigned_to: v })}>
-                  <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="both">Both</SelectItem>
-                    {members.map(m => (
-                      <SelectItem key={m.id} value={m.id}>{m.display_name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <Button onClick={handleSave} className="w-full rounded-xl h-12 font-bold">
-                {editingId ? 'Save Changes' : 'Create Task'}
-              </Button>
-            </div>
-          </DialogContent>
-          </Dialog>
-        </div>
+    <div className="space-y-5">
+      {/* Header */}
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => navigate('/settings')}
+          className="w-8 h-8 -ml-2 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-muted"
+          aria-label="返回设置"
+        >
+          <ChevronLeft className="w-4 h-4" />
+        </button>
+        <h1 className="text-lg font-bold tracking-tight flex-1">管理任务</h1>
+        <Button variant="ghost" size="sm" className="text-xs" onClick={() => setResetOpen(true)}>
+          <RotateCcw className="w-3.5 h-3.5 mr-1" /> 默认清单
+        </Button>
+        <Button
+          size="sm"
+          className="text-xs"
+          onClick={() => { setForm(defaultForm); setEditingId(null); setOpen(true); }}
+        >
+          <Plus className="w-3.5 h-3.5 mr-1" /> 新建
+        </Button>
       </div>
 
-      <AlertDialog open={resetOpen} onOpenChange={setResetOpen}>
+      <p className="text-xs text-muted-foreground">
+        共 {tasks.length} 个任务。次数上限按任务频率结算：每天的任务每天清零，每周的每周一清零，每月的每月 1 号清零。
+      </p>
+
+      {/* Task list */}
+      {grouped.length === 0 && (
+        <div className="text-center py-12 space-y-3">
+          {/* Seeding while the database is unreachable would just fail again. */}
+          {loadError ? (
+            <p className="text-sm text-muted-foreground">任务没能加载出来，请检查网络后重试</p>
+          ) : (
+            <>
+              <p className="text-sm text-muted-foreground">还没有任务</p>
+              <Button size="sm" onClick={() => setResetOpen(true)}>载入默认清单</Button>
+            </>
+          )}
+        </div>
+      )}
+
+      {grouped.map(group => (
+        <div key={group.value}>
+          <div className="flex items-center gap-2 mb-1">
+            <TaskIcon name={group.icon} className="w-3.5 h-3.5 text-muted-foreground" />
+            <h2 className="text-xs font-semibold text-muted-foreground">{group.label}</h2>
+            <span className="text-[10px] text-muted-foreground">{group.tasks.length}</span>
+            <div className="flex-1 h-px bg-border" />
+          </div>
+          <div className="divide-y">
+            {group.tasks.map(task => (
+              <div key={task.id} className="flex items-center gap-3 py-2.5">
+                <div className="w-9 h-9 rounded-lg bg-muted flex items-center justify-center flex-shrink-0 text-muted-foreground">
+                  <TaskIcon name={task.icon} className="w-[18px] h-[18px]" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{task.name}</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {task.points} 分 · {frequencyLabel(task.frequency)} · {cycleLabel(task.frequency)}最多 {task.max_per_cycle} 次
+                  </p>
+                </div>
+                <button
+                  onClick={() => handleEdit(task)}
+                  className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-muted"
+                  aria-label={`编辑 ${task.name}`}
+                >
+                  <Pencil className="w-4 h-4" strokeWidth={1.75} />
+                </button>
+                <button
+                  onClick={() => setDeleteTarget(task)}
+                  className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                  aria-label={`删除 ${task.name}`}
+                >
+                  <Trash2 className="w-4 h-4" strokeWidth={1.75} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+
+      {/* Create / edit dialog */}
+      <Dialog open={open} onOpenChange={o => { setOpen(o); if (!o) { setForm(defaultForm); setEditingId(null); } }}>
+        <DialogContent className="rounded-2xl max-w-sm mx-auto max-h-[88vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-base">{editingId ? '编辑任务' : '新建任务'}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <Input
+              placeholder="任务名称"
+              value={form.name}
+              onChange={e => setForm({ ...form, name: e.target.value })}
+              maxLength={20}
+            />
+
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground mb-2">区域</p>
+              <div className="grid grid-cols-3 gap-1.5">
+                {CATEGORIES.map(cat => (
+                  <button
+                    key={cat.value}
+                    onClick={() => setForm({ ...form, category: cat.value })}
+                    className={`flex items-center justify-center gap-1.5 py-2 rounded-lg border text-xs transition-colors ${
+                      form.category === cat.value
+                        ? 'border-foreground bg-muted font-semibold'
+                        : 'text-muted-foreground hover:bg-muted/50'
+                    }`}
+                  >
+                    <TaskIcon name={cat.icon} className="w-3.5 h-3.5" />
+                    {cat.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground mb-2">图标</p>
+              <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
+                {ICON_GROUPS.map(g => (
+                  <div key={g.label}>
+                    <p className="text-[10px] text-muted-foreground mb-1">{g.label}</p>
+                    <div className="flex flex-wrap gap-1">
+                      {g.icons.map(name => (
+                        <button
+                          key={`${g.label}-${name}`}
+                          onClick={() => setForm({ ...form, icon: name })}
+                          className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+                            form.icon === name
+                              ? 'bg-foreground text-background'
+                              : 'text-muted-foreground hover:bg-muted'
+                          }`}
+                          aria-label={name}
+                        >
+                          <TaskIcon name={name} className="w-4 h-4" />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground mb-1.5">频率</p>
+              <Select
+                value={form.frequency}
+                onValueChange={v => setForm({ ...form, frequency: v as FrequencyValue })}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {FREQUENCIES.map(f => (
+                    <SelectItem key={f.value} value={f.value}>{f.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <p className="text-xs font-semibold text-muted-foreground mb-1.5">分数</p>
+                <Input
+                  type="number" min={1} max={50} value={form.points}
+                  onChange={e => setForm({ ...form, points: Math.max(1, parseInt(e.target.value) || 1) })}
+                />
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-muted-foreground mb-1.5">
+                  {cycleLabel(form.frequency)}上限
+                </p>
+                <Input
+                  type="number" min={1} max={20} value={form.max_per_cycle}
+                  onChange={e => setForm({ ...form, max_per_cycle: Math.max(1, parseInt(e.target.value) || 1) })}
+                />
+              </div>
+            </div>
+
+            <Button onClick={handleSave} disabled={saving || !form.name.trim()} className="w-full font-semibold">
+              {saving ? '保存中…' : editingId ? '保存修改' : '创建任务'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete confirmation */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={o => { if (!o) setDeleteTarget(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>重置为默认任务列表?</AlertDialogTitle>
+            <AlertDialogTitle>删除「{deleteTarget?.name}」?</AlertDialogTitle>
             <AlertDialogDescription>
-              此操作将删除当前所有任务，并重新加载默认任务列表（厨房、厕所、狗、其他综合）。当前任务下的本月完成记录会一并删除（已归档的过往月份不受影响）。
+              这个任务过去所有的完成记录会一起删除，本月和最近几个月的得分会随之变化。已归档的月份总分不受影响。此操作无法撤销。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={resetting}>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={handleReset} disabled={resetting}>
-              {resetting ? '重置中...' : '确认重置'}
+            <AlertDialogCancel disabled={deleting}>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              disabled={deleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleting ? '删除中…' : '删除'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Grouped task list */}
-      {grouped.length === 0 && (
-        <p className="text-center text-muted-foreground py-12">No tasks yet. Tap "Add Task" to get started!</p>
-      )}
-
-      {grouped.map((group, gi) => (
-        <motion.div
-          key={group.value}
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: gi * 0.04 }}
-        >
-          {/* Section header */}
-          <div className="flex items-center gap-2 mb-2">
-            <span className="text-lg">{group.emoji}</span>
-            <h2 className="font-bold text-foreground">{group.label}</h2>
-            <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full">{group.tasks.length}</span>
-          </div>
-
-          <div className="space-y-2">
-            {group.tasks.map((task, i) => (
-              <motion.div
-                key={task.id}
-                initial={{ opacity: 0, x: -6 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: gi * 0.04 + i * 0.03 }}
-                className="bg-card rounded-2xl border p-4 flex items-center gap-3"
-              >
-                <div className="w-2 h-12 rounded-full flex-shrink-0" style={{ backgroundColor: task.color_tag }} />
-                <div className="text-2xl">{task.icon}</div>
-                <div className="flex-1 min-w-0">
-                  <h3 className="font-bold text-foreground truncate">{task.name}</h3>
-                  <p className="text-xs text-muted-foreground">
-                    {task.points} pts · {task.frequency} · max {task.max_per_cycle}/day
-                  </p>
-                </div>
-                <div className="flex gap-1">
-                  <button onClick={() => handleEdit(task)} className="p-2 rounded-xl hover:bg-muted text-muted-foreground">
-                    <Pencil className="w-4 h-4" />
-                  </button>
-                  <button onClick={() => handleDelete(task.id)} className="p-2 rounded-xl hover:bg-destructive/10 text-destructive">
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              </motion.div>
-            ))}
-          </div>
-        </motion.div>
-      ))}
+      {/* Reset confirmation */}
+      <AlertDialog open={resetOpen} onOpenChange={setResetOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>载入默认清单?</AlertDialogTitle>
+            <AlertDialogDescription>
+              删除当前全部任务，换成为 1b1b 整理的 51 项默认清单（厨房 / 卫生间 / 打扫 / 洗衣 / 狗）。
+              当前任务下的完成记录会一并删除，已归档的过往月份总分不受影响。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={resetting}>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={handleReset} disabled={resetting}>
+              {resetting ? '载入中…' : '确认载入'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
