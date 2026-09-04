@@ -10,8 +10,9 @@ import { haptic, playClick } from '@/lib/feedback';
 import PhotoLightbox from '@/components/PhotoLightbox';
 
 /**
- * One chore, one row. Tap the check to bank it; the counter on the left tracks
- * the task's own cycle (day / week / month), not always "today".
+ * One chore, one row. Tap the check to bank it, as many times as you actually
+ * did it — there is no cap. The counter reports the task's own cycle
+ * (day / week / month) so "本周 ×3" means three times this week.
  */
 const TaskRow: React.FC<{ task: Task; sortMode?: boolean }> = ({ task, sortMode }) => {
   const { currentMember, completions, householdId, members, uploadProofPhoto, mutateCompletions } = useHousehold();
@@ -36,8 +37,6 @@ const TaskRow: React.FC<{ task: Task; sortMode?: boolean }> = ({ task, sortMode 
   }, [cycleCompletions]);
 
   const done = cycleCompletions.length;
-  const isFull = done >= task.max_per_cycle;
-  const canComplete = !isFull;
   const canUndo = myCompletions.length > 0;
 
   const latestPhoto = useMemo(() => {
@@ -87,7 +86,7 @@ const TaskRow: React.FC<{ task: Task; sortMode?: boolean }> = ({ task, sortMode 
   };
 
   const handleComplete = async () => {
-    if (!canComplete || !currentMember || !householdId) return;
+    if (!currentMember || !householdId) return;
     celebrate();
     await insertCompletion(null);
   };
@@ -107,7 +106,7 @@ const TaskRow: React.FC<{ task: Task; sortMode?: boolean }> = ({ task, sortMode 
   const handlePhotoSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
-    if (!file || !canComplete || !currentMember || !householdId) return;
+    if (!file || !currentMember || !householdId) return;
     setUploading(true);
     try {
       const url = await uploadProofPhoto(file);
@@ -123,7 +122,7 @@ const TaskRow: React.FC<{ task: Task; sortMode?: boolean }> = ({ task, sortMode 
   };
 
   return (
-    <div className={`flex items-center gap-3 py-2.5 transition-opacity ${isFull && !sortMode ? 'opacity-45' : ''}`}>
+    <div className="flex items-center gap-3 py-2.5">
       {/* Icon */}
       <div className="w-9 h-9 rounded-lg bg-muted flex items-center justify-center flex-shrink-0 text-muted-foreground">
         <TaskIcon name={task.icon} className="w-[18px] h-[18px]" />
@@ -131,11 +130,15 @@ const TaskRow: React.FC<{ task: Task; sortMode?: boolean }> = ({ task, sortMode 
 
       {/* Name + status */}
       <div className="flex-1 min-w-0">
-        <p className={`text-sm font-medium truncate ${isFull && !sortMode ? 'line-through' : ''}`}>{task.name}</p>
+        <p className="text-sm font-medium truncate">{task.name}</p>
         <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground mt-0.5">
           <span>{task.points} 分</span>
-          <span>·</span>
-          <span>{cycleLabel(task.frequency)} {done}/{task.max_per_cycle}</span>
+          {done > 0 && (
+            <>
+              <span>·</span>
+              <span>{cycleLabel(task.frequency)} ×{done}</span>
+            </>
+          )}
           {members.map(m => {
             const count = memberCounts[m.id];
             if (!count) return null;
@@ -176,7 +179,7 @@ const TaskRow: React.FC<{ task: Task; sortMode?: boolean }> = ({ task, sortMode 
         ) : (
           <button
             onClick={() => fileInputRef.current?.click()}
-            disabled={!canComplete || uploading}
+            disabled={uploading}
             className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-muted disabled:opacity-30 transition-colors"
             title="拍照打卡"
           >
@@ -195,12 +198,7 @@ const TaskRow: React.FC<{ task: Task; sortMode?: boolean }> = ({ task, sortMode 
 
         <button
           onClick={handleComplete}
-          disabled={!canComplete}
-          className={`w-9 h-9 rounded-lg flex items-center justify-center transition-colors active:scale-95 ${
-            canComplete
-              ? 'bg-foreground text-background'
-              : 'bg-muted text-muted-foreground'
-          }`}
+          className="w-9 h-9 rounded-lg flex items-center justify-center transition-colors active:scale-95 bg-foreground text-background" 
           aria-label={`完成 ${task.name}`}
         >
           <Check className="w-[18px] h-[18px]" strokeWidth={2.5} />

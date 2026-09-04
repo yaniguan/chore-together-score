@@ -41,8 +41,8 @@ const t = (
 });
 
 // Default chore list for a 1b1b apartment with a dog and in-unit laundry.
-// `max_per_cycle` is per cycle, not per day — a weekly task with max 1 can be
-// logged once between Monday and Sunday.
+// `max_per_cycle` is kept for the column's sake but no longer caps anything —
+// a chore can be logged as many times as it was actually done.
 export const SEED_TASKS: SeedTask[] = [
   // ── 厨房 ────────────────────────────────────────────────────────────────
   t('做饭',          'cooking-pot',     'kitchen',  'daily',   2, 6),

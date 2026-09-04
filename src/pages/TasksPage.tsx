@@ -14,7 +14,6 @@ import {
 } from '@/lib/constants';
 import { CATEGORY_COLORS } from '@/lib/seedTasks';
 import { ICON_GROUPS, TaskIcon } from '@/lib/taskIcons';
-import { cycleLabel } from '@/lib/completions';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -31,13 +30,11 @@ interface TaskFormData {
   icon: string;
   category: CategoryValue;
   frequency: FrequencyValue;
-  max_per_cycle: number;
   points: number;
 }
 
 const defaultForm: TaskFormData = {
-  name: '', icon: 'sparkles', category: 'cleaning', frequency: 'daily',
-  max_per_cycle: 1, points: 3,
+  name: '', icon: 'sparkles', category: 'cleaning', frequency: 'daily', points: 3,
 };
 
 const TasksPage: React.FC = () => {
@@ -61,7 +58,6 @@ const TasksPage: React.FC = () => {
       category: form.category,
       frequency: form.frequency,
       frequency_value: 1,
-      max_per_cycle: form.max_per_cycle,
       points: form.points,
       color_tag: CATEGORY_COLORS[form.category],
     };
@@ -92,7 +88,6 @@ const TasksPage: React.FC = () => {
       icon: task.icon,
       category: normalizeCategory(task.category),
       frequency: normalizeFrequency(task.frequency),
-      max_per_cycle: task.max_per_cycle,
       points: task.points,
     });
     setEditingId(task.id);
@@ -159,7 +154,7 @@ const TasksPage: React.FC = () => {
       </div>
 
       <p className="text-xs text-muted-foreground">
-        共 {tasks.length} 个任务。次数上限按任务频率结算：每天的任务每天清零，每周的每周一清零，每月的每月 1 号清零。
+        共 {tasks.length} 个任务。完成次数不限，做几次记几次；频率只决定首页的分组和计数窗口（每天当天清零、每周周一清零、每月 1 号清零）。
       </p>
 
       {/* Task list */}
@@ -194,7 +189,7 @@ const TasksPage: React.FC = () => {
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium truncate">{task.name}</p>
                   <p className="text-[11px] text-muted-foreground">
-                    {task.points} 分 · {frequencyLabel(task.frequency)} · {cycleLabel(task.frequency)}最多 {task.max_per_cycle} 次
+                    {task.points} 分 · {frequencyLabel(task.frequency)}
                   </p>
                 </div>
                 <button
@@ -293,23 +288,12 @@ const TasksPage: React.FC = () => {
               </Select>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <p className="text-xs font-semibold text-muted-foreground mb-1.5">分数</p>
-                <Input
-                  type="number" min={1} max={50} value={form.points}
-                  onChange={e => setForm({ ...form, points: Math.max(1, parseInt(e.target.value) || 1) })}
-                />
-              </div>
-              <div>
-                <p className="text-xs font-semibold text-muted-foreground mb-1.5">
-                  {cycleLabel(form.frequency)}上限
-                </p>
-                <Input
-                  type="number" min={1} max={20} value={form.max_per_cycle}
-                  onChange={e => setForm({ ...form, max_per_cycle: Math.max(1, parseInt(e.target.value) || 1) })}
-                />
-              </div>
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground mb-1.5">每次得分</p>
+              <Input
+                type="number" min={1} max={50} value={form.points}
+                onChange={e => setForm({ ...form, points: Math.max(1, parseInt(e.target.value) || 1) })}
+              />
             </div>
 
             <Button onClick={handleSave} disabled={saving || !form.name.trim()} className="w-full font-semibold">

@@ -62,25 +62,25 @@ const TodayPage: React.FC = () => {
     });
   }, [completions]);
 
-  // ── Today's progress — daily tasks only, so the bar can actually reach 100% ──
+  // ── Today's progress ─────────────────────────────────────────────────────
+  // Points have no ceiling any more, so the bar tracks coverage instead:
+  // how many of today's daily chores have been touched at least once. Points
+  // are reported alongside as a plain running total.
   const todayProgress = useMemo(() => {
     const dailyTasks = tasks.filter(t => normalizeFrequency(t.frequency) === 'daily');
     const { start, end } = getDayBounds(new Date());
-    let earned = 0;
-    let possible = 0;
-    let doneCount = 0;
+    const todaysCompletions = completions.filter(c => {
+      const at = new Date(c.completed_at);
+      return at >= start && at <= end;
+    });
+    const touched = new Set(todaysCompletions.map(c => c.task_id));
 
-    for (const task of dailyTasks) {
-      possible += task.max_per_cycle * task.points;
-      const todays = completions.filter(c => {
-        if (c.task_id !== task.id) return false;
-        const at = new Date(c.completed_at);
-        return at >= start && at <= end;
-      });
-      earned += todays.reduce((s, c) => s + c.points_earned, 0);
-      if (todays.length > 0) doneCount++;
-    }
-    return { earned, possible, doneCount, total: dailyTasks.length };
+    return {
+      earned: todaysCompletions.reduce((s, c) => s + c.points_earned, 0),
+      logged: todaysCompletions.length,
+      doneCount: dailyTasks.filter(t => touched.has(t.id)).length,
+      total: dailyTasks.length,
+    };
   }, [tasks, completions]);
 
   const currentStreak = useMemo(
@@ -144,15 +144,17 @@ const TodayPage: React.FC = () => {
   const { enabled: notificationsEnabled } = useNotifications();
   const getRemainingCount = useCallback(() => {
     const { start, end } = getDayBounds(new Date());
-    return tasks.filter(task => {
-      if (normalizeFrequency(task.frequency) !== 'daily') return false;
-      const doneToday = completions.filter(c => {
-        if (c.task_id !== task.id) return false;
-        const at = new Date(c.completed_at);
-        return at >= start && at <= end;
-      }).length;
-      return doneToday < task.max_per_cycle;
-    }).length;
+    const touched = new Set(
+      completions
+        .filter(c => {
+          const at = new Date(c.completed_at);
+          return at >= start && at <= end;
+        })
+        .map(c => c.task_id),
+    );
+    return tasks.filter(
+      task => normalizeFrequency(task.frequency) === 'daily' && !touched.has(task.id),
+    ).length;
   }, [tasks, completions]);
   useDailyReminder(notificationsEnabled, getRemainingCount);
 
@@ -191,8 +193,8 @@ const TodayPage: React.FC = () => {
     });
   };
 
-  const progressPct = todayProgress.possible > 0
-    ? Math.min(100, (todayProgress.earned / todayProgress.possible) * 100)
+  const progressPct = todayProgress.total > 0
+    ? (todayProgress.doneCount / todayProgress.total) * 100
     : 0;
 
   return (
@@ -227,7 +229,9 @@ const TodayPage: React.FC = () => {
         </div>
         <div className="flex items-baseline gap-1">
           <span className="text-2xl font-bold tabular-nums">{todayProgress.earned}</span>
-          <span className="text-xs text-muted-foreground">/ {todayProgress.possible} 分</span>
+          <span className="text-xs text-muted-foreground">
+            分{todayProgress.logged > 0 ? ` · ${todayProgress.logged} 次` : ''}
+          </span>
         </div>
         <div className="h-1.5 rounded-full bg-muted overflow-hidden mt-2.5">
           <div className="h-full bg-foreground transition-all duration-500" style={{ width: `${progressPct}%` }} />

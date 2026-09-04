@@ -20,6 +20,7 @@ export interface Task {
   category: string;
   frequency: string;
   frequency_value: number | null;
+  /** Legacy column. Retained on the row but no longer caps completions. */
   max_per_cycle: number;
   points: number;
   assigned_to: string;

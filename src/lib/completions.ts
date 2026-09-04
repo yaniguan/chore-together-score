@@ -39,9 +39,10 @@ export const getMonthBounds = (date: Date) => {
 };
 
 /**
- * The window a task's `max_per_cycle` applies to. A daily task resets at
- * midnight, a weekly one on Monday, a monthly one on the 1st — so "洗油烟机,
- * max 1, monthly" can genuinely only be banked once a month.
+ * The counting window for a task. A daily task resets at midnight, a weekly
+ * one on Monday, a monthly one on the 1st — so a monthly chore reports "本月
+ * ×2" rather than restarting from zero every day. Completions are never
+ * capped; this only decides what the count is counting.
  */
 export const getCycleBounds = (frequency: string | null | undefined, date: Date) => {
   switch (normalizeFrequency(frequency)) {

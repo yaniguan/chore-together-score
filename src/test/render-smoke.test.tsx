@@ -107,10 +107,12 @@ describe('pages render without crashing', () => {
     expect(screen.queryByText('洗油烟机')).not.toBeInTheDocument();
   });
 
-  it('TodayPage progress denominator counts daily tasks only', async () => {
+  it('TodayPage progress tracks coverage of daily tasks, with no points ceiling', async () => {
     withApp(<TodayPage />);
-    // Daily only: 洗碗 3×4 + 做早餐 1×2 + 擦灶台 1×3 = 17. The 8-point monthly task must not inflate it.
-    expect(await screen.findByText('/ 17 分')).toBeInTheDocument();
+    // Three daily chores (洗碗, 做早餐, 擦灶台); the monthly one is not counted.
+    expect(await screen.findByText('每天任务 0/3')).toBeInTheDocument();
+    // No "/ N 分" ceiling anywhere on the card.
+    expect(screen.queryByText(/\/ \d+ 分/)).not.toBeInTheDocument();
   });
 
   it('MonthPage renders', async () => {
@@ -191,5 +193,26 @@ describe('manual task order', () => {
     // Leaving sort mode restores the filter you came from.
     await act(async () => { fireEvent.click(screen.getByText('完成')); });
     expect(screen.queryByText('洗油烟机')).not.toBeInTheDocument();
+  });
+});
+
+describe('no completion cap', () => {
+  it('keeps the complete button enabled past the old max_per_cycle', async () => {
+    // 擦灶台 carries max_per_cycle: 1 and already has two completions today.
+    const today = new Date();
+    today.setHours(9, 0, 0, 0);
+    tableRows.completions = [
+      { id: 'c1', task_id: 't5', household_id: 'h1', member_id: 'm1',
+        points_earned: 3, completed_at: today.toISOString(), photo_url: null },
+      { id: 'c2', task_id: 't5', household_id: 'h1', member_id: 'm1',
+        points_earned: 3, completed_at: today.toISOString(), photo_url: null },
+    ];
+
+    withApp(<TodayPage />);
+    const button = await screen.findByLabelText('完成 擦灶台');
+    expect(button).not.toBeDisabled();
+    // And the row reports what happened rather than a fraction of a limit.
+    expect(screen.getByText('今天 ×2')).toBeInTheDocument();
+    expect(screen.queryByText('今天 2/1')).not.toBeInTheDocument();
   });
 });
