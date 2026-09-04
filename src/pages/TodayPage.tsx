@@ -1,10 +1,11 @@
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
-import { useHousehold, Completion } from '@/context/HouseholdContext';
+import { useHousehold, Completion, Task } from '@/context/HouseholdContext';
 import TaskRow from '@/components/TaskRow';
 import PhotoLightbox from '@/components/PhotoLightbox';
 import MonthDuelCard from '@/components/MonthDuelCard';
 import { supabase } from '@/integrations/supabase/client';
-import { Flame } from 'lucide-react';
+import { Flame, GripVertical, Check } from 'lucide-react';
+import { Reorder } from 'framer-motion';
 import { CATEGORIES, FREQUENCIES, normalizeCategory, normalizeFrequency, FrequencyValue } from '@/lib/constants';
 import { TaskIcon } from '@/lib/taskIcons';
 import { getDayBounds, calculateStreak } from '@/lib/completions';
@@ -19,12 +20,15 @@ const FILTERS: { value: Filter; label: string }[] = [
 ];
 
 const TodayPage: React.FC = () => {
-  const { tasks, completions, currentMember, members, householdId, loadError } = useHousehold();
+  const { tasks, completions, currentMember, members, householdId, loadError, reorderTasks } = useHousehold();
   const [filter, setFilter] = useState<Filter>('daily');
   const [selectedOffset, setSelectedOffset] = useState(0); // 0 = today, 1 = yesterday …
   const [pastCompletions, setPastCompletions] = useState<Completion[]>([]);
   const [loadingPast, setLoadingPast] = useState(false);
   const [previewPhoto, setPreviewPhoto] = useState<string | null>(null);
+  const [sortMode, setSortMode] = useState(false);
+  const [filterBeforeSort, setFilterBeforeSort] = useState<Filter>('daily');
+  const [draftOrder, setDraftOrder] = useState<Record<string, Task[]>>({});
 
   const isToday = selectedOffset === 0;
 
@@ -152,6 +156,41 @@ const TodayPage: React.FC = () => {
   }, [tasks, completions]);
   useDailyReminder(notificationsEnabled, getRemainingCount);
 
+  // Reordering a filtered subset is a lie — you'd be dropping a row above one
+  // you can't see. Entering sort mode therefore shows the whole list.
+  const enterSortMode = () => {
+    setFilterBeforeSort(filter);
+    setFilter('all');
+    setSortMode(true);
+  };
+
+  const exitSortMode = () => {
+    setFilter(filterBeforeSort);
+    setDraftOrder({});
+    setSortMode(false);
+  };
+
+  // onReorder fires continuously while a row is being dragged, so the live
+  // order is held locally and only written once, on drop.
+  const orderFor = (category: string, groupTasks: Task[]) => draftOrder[category] ?? groupTasks;
+
+  const handleReorder = (category: string, next: Task[]) => {
+    setDraftOrder(prev => ({ ...prev, [category]: next }));
+  };
+
+  const commitOrder = async (category: string) => {
+    const pending = draftOrder[category];
+    if (!pending) return;
+    await reorderTasks(pending.map(t => t.id));
+    // Clear either way: on success the context already matches, on failure it
+    // has rolled back and the draft would be showing a lie.
+    setDraftOrder(prev => {
+      const next = { ...prev };
+      delete next[category];
+      return next;
+    });
+  };
+
   const progressPct = todayProgress.possible > 0
     ? Math.min(100, (todayProgress.earned / todayProgress.possible) * 100)
     : 0;
@@ -225,20 +264,43 @@ const TodayPage: React.FC = () => {
 
       {isToday ? (
         <>
-          {/* Frequency filter */}
-          <div className="flex gap-1 p-0.5 rounded-lg bg-muted">
-            {FILTERS.map(f => (
+          {/* Frequency filter + reorder toggle */}
+          {sortMode ? (
+            <div className="flex items-center gap-2 rounded-lg border border-dashed px-3 py-2">
+              <GripVertical className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" strokeWidth={1.75} />
+              <p className="text-xs text-muted-foreground flex-1">拖动任务调整顺序，可在同一区域内移动</p>
               <button
-                key={f.value}
-                onClick={() => setFilter(f.value)}
-                className={`flex-1 text-xs py-1.5 rounded-md font-medium transition-colors ${
-                  filter === f.value ? 'bg-background shadow-sm' : 'text-muted-foreground'
-                }`}
+                onClick={exitSortMode}
+                className="text-xs font-semibold flex items-center gap-1 px-2 py-1 rounded-md bg-foreground text-background"
               >
-                {f.label}
+                <Check className="w-3 h-3" strokeWidth={2.5} /> 完成
               </button>
-            ))}
-          </div>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5">
+              <div className="flex gap-1 p-0.5 rounded-lg bg-muted flex-1">
+                {FILTERS.map(f => (
+                  <button
+                    key={f.value}
+                    onClick={() => setFilter(f.value)}
+                    className={`flex-1 text-xs py-1.5 rounded-md font-medium transition-colors ${
+                      filter === f.value ? 'bg-background shadow-sm' : 'text-muted-foreground'
+                    }`}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={enterSortMode}
+                disabled={tasks.length === 0}
+                className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 px-2 py-1.5 rounded-md hover:bg-muted disabled:opacity-40 flex-shrink-0"
+                title="调整任务顺序"
+              >
+                <GripVertical className="w-3.5 h-3.5" strokeWidth={1.75} /> 排序
+              </button>
+            </div>
+          )}
 
           {tasks.length === 0 ? (
             /* Never claim the list is empty when we simply failed to load it. */
@@ -261,9 +323,31 @@ const TodayPage: React.FC = () => {
                   <h2 className="text-xs font-semibold text-muted-foreground">{group.label}</h2>
                   <div className="flex-1 h-px bg-border" />
                 </div>
-                <div className="divide-y">
-                  {group.tasks.map(task => <TaskRow key={task.id} task={task} />)}
-                </div>
+                {sortMode ? (
+                  <Reorder.Group
+                    axis="y"
+                    values={orderFor(group.value, group.tasks)}
+                    onReorder={next => handleReorder(group.value, next)}
+                    className="divide-y"
+                  >
+                    {orderFor(group.value, group.tasks).map(task => (
+                      <Reorder.Item
+                        key={task.id}
+                        value={task}
+                        style={{ touchAction: 'none' }}
+                        whileDrag={{ scale: 1.02, zIndex: 10 }}
+                        onDragEnd={() => { void commitOrder(group.value); }}
+                        className="bg-background cursor-grab active:cursor-grabbing"
+                      >
+                        <TaskRow task={task} sortMode />
+                      </Reorder.Item>
+                    ))}
+                  </Reorder.Group>
+                ) : (
+                  <div className="divide-y">
+                    {group.tasks.map(task => <TaskRow key={task.id} task={task} />)}
+                  </div>
+                )}
               </div>
             ))
           )}

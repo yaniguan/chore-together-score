@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { toast } from 'sonner';
 import { parseStoredHouseholdMember } from '@/lib/householdStorage';
 import { getMonthKey, getMonthRange } from '@/lib/monthCycle';
 import { SEED_TASKS } from '@/lib/seedTasks';
@@ -23,6 +24,7 @@ export interface Task {
   points: number;
   assigned_to: string;
   color_tag: string;
+  sort_order: number | null;
   created_by: string | null;
   created_at: string;
 }
@@ -98,6 +100,8 @@ interface HouseholdContextType {
   logout: () => void;
   refreshData: () => Promise<void>;
   resetTasksToDefaults: () => Promise<void>;
+  /** Persists a new manual order for the given task ids, in the order supplied. */
+  reorderTasks: (orderedIds: string[]) => Promise<boolean>;
   uploadProofPhoto: (file: File) => Promise<string | null>;
   // Optimistic mutators — pages call these to update local state before the
   // server round-trip; on failure they call again to roll back. Realtime /
@@ -114,6 +118,15 @@ export const useHousehold = () => {
   const ctx = useContext(HouseholdContext);
   if (!ctx) throw new Error('useHousehold must be used within HouseholdProvider');
   return ctx;
+};
+
+// Manual order first, then creation order for anything not yet positioned
+// (rows created before the sort_order migration, or inserted since).
+const byManualOrder = (a: Task, b: Task) => {
+  const ao = a.sort_order ?? Number.MAX_SAFE_INTEGER;
+  const bo = b.sort_order ?? Number.MAX_SAFE_INTEGER;
+  if (ao !== bo) return ao - bo;
+  return a.created_at.localeCompare(b.created_at);
 };
 
 export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -193,7 +206,7 @@ export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setLoadError(null);
 
     if (membersRes.data) setMembers(membersRes.data as HouseholdMember[]);
-    if (tasksRes.data) setTasks(tasksRes.data as Task[]);
+    if (tasksRes.data) setTasks([...(tasksRes.data as Task[])].sort(byManualOrder));
     if (completionsRes.data) setCompletions(completionsRes.data as Completion[]);
     if (rewardsRes.data) setRewards(rewardsRes.data as Reward[]);
     if (redemptionsRes.data) setRedemptions(redemptionsRes.data as Redemption[]);
@@ -221,32 +234,86 @@ export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     return data.publicUrl ?? null;
   }, [householdId]);
 
-  const seedTasks = useCallback(async (hId: string) => {
-    const { data: existing } = await supabase.from('tasks').select('id').eq('household_id', hId).limit(1);
-    if (existing && existing.length > 0) return;
+  /**
+   * Writes a new manual order. Optimistic: the list reorders locally first and
+   * rolls back if the write fails. Degrades with a clear message when the
+   * sort_order migration has not been applied to this database yet.
+   */
+  const reorderTasks = useCallback(async (orderedIds: string[]): Promise<boolean> => {
+    if (!householdId || orderedIds.length === 0) return false;
 
-    const tasksToInsert = SEED_TASKS.map(t => ({
+    const position = new Map(orderedIds.map((id, i) => [id, (i + 1) * 10]));
+    let previous: Task[] = [];
+    setTasks(prev => {
+      previous = prev;
+      return [...prev]
+        .map(t => (position.has(t.id) ? { ...t, sort_order: position.get(t.id)! } : t))
+        .sort(byManualOrder);
+    });
+
+    const results = await Promise.all(
+      orderedIds.map(id =>
+        supabase.from('tasks').update({ sort_order: position.get(id)! }).eq('id', id),
+      ),
+    );
+    const failure = results.map(r => r.error).find(Boolean);
+    if (failure) {
+      console.error('reorderTasks failed', failure);
+      setTasks(previous);
+      const missingColumn = /sort_order/.test(failure.message) &&
+        /column|schema cache/i.test(failure.message);
+      toast.error(
+        missingColumn
+          ? '数据库还没有 sort_order 字段，请先在 Supabase 里跑排序迁移 SQL'
+          : `排序保存失败: ${failure.message}`,
+        { duration: 6000 },
+      );
+      return false;
+    }
+    return true;
+  }, [householdId]);
+
+  /**
+   * Inserts the default list, positioned in the order it is written in
+   * lib/seedTasks. Falls back to inserting without positions so a database
+   * that has not had the sort_order migration applied still gets its tasks
+   * rather than silently ending up empty.
+   */
+  const insertSeedTasks = useCallback(async (hId: string, createdBy: string | null) => {
+    const base = SEED_TASKS.map(t => ({
       ...t,
       household_id: hId,
       assigned_to: 'both',
+      created_by: createdBy,
     }));
-    await supabase.from('tasks').insert(tasksToInsert);
+    const positioned = base.map((t, i) => ({ ...t, sort_order: (i + 1) * 10 }));
+
+    const { error } = await supabase.from('tasks').insert(positioned);
+    if (!error) return;
+
+    if (/sort_order/.test(error.message)) {
+      const retry = await supabase.from('tasks').insert(base);
+      if (!retry.error) return;
+      throw new Error(retry.error.message);
+    }
+    throw new Error(error.message);
   }, []);
+
+  const seedTasks = useCallback(async (hId: string) => {
+    const { data: existing } = await supabase.from('tasks').select('id').eq('household_id', hId).limit(1);
+    if (existing && existing.length > 0) return;
+    await insertSeedTasks(hId, null);
+  }, [insertSeedTasks]);
 
   const resetTasksToDefaults = useCallback(async () => {
     if (!householdId) return;
     // Delete current tasks (cascades to their completions). Monthly archive
     // rows are preserved because they don't reference task ids.
-    await supabase.from('tasks').delete().eq('household_id', householdId);
-    const tasksToInsert = SEED_TASKS.map(t => ({
-      ...t,
-      household_id: householdId,
-      assigned_to: 'both',
-      created_by: currentMember?.id ?? null,
-    }));
-    await supabase.from('tasks').insert(tasksToInsert);
+    const { error } = await supabase.from('tasks').delete().eq('household_id', householdId);
+    if (error) throw new Error(error.message);
+    await insertSeedTasks(householdId, currentMember?.id ?? null);
     await refreshData();
-  }, [householdId, currentMember, refreshData]);
+  }, [householdId, currentMember, refreshData, insertSeedTasks]);
 
   // Archive any past months that haven't been archived yet. Idempotent.
   const archiveRunRef = useRef<string | null>(null);
@@ -316,9 +383,12 @@ export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   }, [householdId, members, refreshData]);
 
   useEffect(() => {
-    if (householdId) {
-      seedTasks(householdId).then(() => refreshData());
-    }
+    if (!householdId) return;
+    // Seeding is best-effort: load the household either way, so a failure here
+    // surfaces as the connection banner rather than a blank screen.
+    seedTasks(householdId)
+      .catch(e => console.error('seedTasks failed', e))
+      .finally(() => { refreshData(); });
   }, [householdId, seedTasks, refreshData]);
 
   // Realtime subscriptions. Every table change used to fire a full refresh, so
@@ -392,7 +462,7 @@ export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       rewards, redemptions, monthlyScores, shoppingItems, loadError,
       monthEarned, monthSpent, availablePoints,
       setCurrentMember, setHouseholdId, logout, refreshData,
-      resetTasksToDefaults, uploadProofPhoto,
+      resetTasksToDefaults, reorderTasks, uploadProofPhoto,
       mutateCompletions: setCompletions,
       mutateShoppingItems: setShoppingItems,
     }}>

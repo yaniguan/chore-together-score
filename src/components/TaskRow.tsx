@@ -2,7 +2,7 @@ import React, { useMemo, useRef, useState } from 'react';
 import { useHousehold, Task } from '@/context/HouseholdContext';
 import { supabase } from '@/integrations/supabase/client';
 import confetti from 'canvas-confetti';
-import { Check, Undo2, Camera } from 'lucide-react';
+import { Check, Undo2, Camera, GripVertical } from 'lucide-react';
 import { getTaskCompletionsForCycle, cycleLabel } from '@/lib/completions';
 import { TaskIcon } from '@/lib/taskIcons';
 import { toast } from 'sonner';
@@ -13,7 +13,7 @@ import PhotoLightbox from '@/components/PhotoLightbox';
  * One chore, one row. Tap the check to bank it; the counter on the left tracks
  * the task's own cycle (day / week / month), not always "today".
  */
-const TaskRow: React.FC<{ task: Task }> = ({ task }) => {
+const TaskRow: React.FC<{ task: Task; sortMode?: boolean }> = ({ task, sortMode }) => {
   const { currentMember, completions, householdId, members, uploadProofPhoto, mutateCompletions } = useHousehold();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -123,7 +123,7 @@ const TaskRow: React.FC<{ task: Task }> = ({ task }) => {
   };
 
   return (
-    <div className={`flex items-center gap-3 py-2.5 transition-opacity ${isFull ? 'opacity-45' : ''}`}>
+    <div className={`flex items-center gap-3 py-2.5 transition-opacity ${isFull && !sortMode ? 'opacity-45' : ''}`}>
       {/* Icon */}
       <div className="w-9 h-9 rounded-lg bg-muted flex items-center justify-center flex-shrink-0 text-muted-foreground">
         <TaskIcon name={task.icon} className="w-[18px] h-[18px]" />
@@ -131,7 +131,7 @@ const TaskRow: React.FC<{ task: Task }> = ({ task }) => {
 
       {/* Name + status */}
       <div className="flex-1 min-w-0">
-        <p className={`text-sm font-medium truncate ${isFull ? 'line-through' : ''}`}>{task.name}</p>
+        <p className={`text-sm font-medium truncate ${isFull && !sortMode ? 'line-through' : ''}`}>{task.name}</p>
         <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground mt-0.5">
           <span>{task.points} 分</span>
           <span>·</span>
@@ -158,7 +158,12 @@ const TaskRow: React.FC<{ task: Task }> = ({ task }) => {
         onChange={handlePhotoSelected}
       />
 
-      {/* Actions */}
+      {/* In sort mode the row is a drag target, so the tap targets step aside. */}
+      {sortMode ? (
+        <span className="text-muted-foreground/60 pr-1 flex-shrink-0" aria-hidden>
+          <GripVertical className="w-4 h-4" strokeWidth={1.75} />
+        </span>
+      ) : (
       <div className="flex items-center gap-0.5 flex-shrink-0">
         {latestPhoto ? (
           <button
@@ -201,6 +206,7 @@ const TaskRow: React.FC<{ task: Task }> = ({ task }) => {
           <Check className="w-[18px] h-[18px]" strokeWidth={2.5} />
         </button>
       </div>
+      )}
 
       {previewUrl && <PhotoLightbox url={previewUrl} onClose={() => setPreviewUrl(null)} />}
     </div>

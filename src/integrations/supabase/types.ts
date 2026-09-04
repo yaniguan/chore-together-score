@@ -134,6 +134,7 @@ export type Database = {
           max_per_cycle: number
           name: string
           points: number
+          sort_order: number | null
         }
         Insert: {
           assigned_to?: string
@@ -149,6 +150,7 @@ export type Database = {
           max_per_cycle?: number
           name: string
           points?: number
+          sort_order?: number | null
         }
         Update: {
           assigned_to?: string
@@ -164,6 +166,7 @@ export type Database = {
           max_per_cycle?: number
           name?: string
           points?: number
+          sort_order?: number | null
         }
         Relationships: [
           {
