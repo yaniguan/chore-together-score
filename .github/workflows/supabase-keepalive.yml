@@ -1,38 +1,61 @@
 name: Supabase keep-alive
 
-# Supabase 免费版在 7 天无活动后会暂停项目。
-# 这个 workflow 每 3 天查询一次数据库，保持项目活跃。
 on:
   schedule:
-    - cron: "0 6 */3 * *" # 每 3 天 UTC 06:00
-  workflow_dispatch: # 也可以在 Actions 页面手动触发
+    - cron: "0 6 */3 * *"
+  pull_request:
+    paths:
+      - ".github/workflows/supabase-keepalive.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Query Supabase
         run: |
           set -euo pipefail
-          # 直接读仓库里已提交的 .env（anon key 本来就是公开的 publishable key）
+          if [ ! -f .env ]; then
+            echo "::warning::No .env file found; skipping keep-alive."
+            exit 0
+          fi
           read_env() {
-            grep -E "^$1=" .env | head -1 | cut -d= -f2- | tr -d '"\r'
+            grep -E "^$1=" .env | head -1 | cut -d= -f2- | tr -d '"\r' || true
           }
           SUPABASE_URL=$(read_env VITE_SUPABASE_URL)
           SUPABASE_KEY=$(read_env VITE_SUPABASE_PUBLISHABLE_KEY)
+          if [ -z "${SUPABASE_URL}" ] || [ -z "${SUPABASE_KEY}" ]; then
+            echo "::warning::Missing Supabase URL or publishable key in .env; skipping keep-alive."
+            exit 0
+          fi
 
-          # 真正打到 Postgres 的一次查询，而不只是碰一下 API 网关
+          rc=0
           status=$(curl -s -o /tmp/body.txt -w '%{http_code}' --max-time 30 \
             -H "apikey: ${SUPABASE_KEY}" \
             -H "Authorization: Bearer ${SUPABASE_KEY}" \
-            "${SUPABASE_URL}/rest/v1/households?select=id&limit=1")
+            "${SUPABASE_URL}/rest/v1/households?select=id&limit=1") || rc=$?
 
-          echo "HTTP ${status}"
-          cat /tmp/body.txt
+          echo "curl_rc=${rc} HTTP ${status}"
+          if [ -f /tmp/body.txt ]; then
+            cat /tmp/body.txt
+            echo ""
+          fi
 
-          if [ "$status" != "200" ]; then
-            echo "::error::Supabase keep-alive 失败（HTTP ${status}）——项目可能已暂停，去 Dashboard 点 Restore project"
+          if [ "${rc}" -ne 0 ] || [ "${status}" = "000" ] || [ "${status}" = "540" ]; then
+            echo "::warning::Supabase project appears paused or unreachable (curl rc=${rc}, HTTP ${status}). Restore in Supabase Dashboard to resume active pings."
+            exit 0
+          fi
+
+          if [ "${status}" != "200" ]; then
+            echo "::error::Unexpected Supabase HTTP ${status}"
             exit 1
           fi
